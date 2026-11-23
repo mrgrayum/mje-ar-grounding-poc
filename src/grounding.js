@@ -27,6 +27,7 @@ export const GROUND_CONFIG = {
   TAP_MAX_MS: 500,
   TOUCH_RADIUS_PX: 24, // a finger also "reaches" this far around the tap point (a mouse does not)
   THIN_PX: 14, // a part thinner than this on screen counts as a thin wire-like part that fingers snap to
+  TAG_HEIGHT: 0.032, // height of a conductor's name tag on screen, as a fraction of the screen height
   NAME_CHOICES: ['A Phase', 'B Phase', 'C Phase', 'Neutral', 'Static'], // quick buttons offered when a conductor is first tapped
   PART_LABELS: {GroundLead: 'Pole ground', GroundPoint: 'Ground point', Pole: 'Pole', Crossarm1: 'Crossarm'}, // plain names for parts that are not asked about
 }
@@ -85,7 +86,10 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   let viewing = null // while a saved record is on screen (read-only): {record, stash}
   let structure = {number: '', line: '', job: ''} // which structure and job this plan is for
   let labels = {} // part name -> the name the user gave it (for example PhaseB_Conductor -> "B Phase")
-  let nameRequest = null // a conductor was just tapped and still needs a name: {part, suggestion}
+  let nameRequest = null // a conductor is being named: {part, suggestion, current}
+  let nameMode = false // "Name conductors by tapping": taps name conductors instead of placing clamps
+  let modeNote = '' // a short hint shown in name mode (for example when a tap was not on a conductor)
+  let anchors = {} // part name -> where on the model its name tag sits (model coordinates)
 
   const emit = () => listeners.forEach(fn => fn())
 
@@ -110,6 +114,75 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     const found = new Set()
     stage.modelGroup.traverse((o) => { if (o.isMesh && !o.userData.noPick && o.name && isConductor(o.name)) found.add(o.name) })
     return [...found].sort()
+  }
+
+  // ---- naming by tapping the model ----------------------------------------------------------------------
+  // The conductor being named lights up, and every named conductor wears a small name tag, so nobody needs to know
+  // the part names inside the 3D model.
+  const hiMat = new THREE.MeshStandardMaterial({color: 0xFFEF00, emissive: 0xFFEF00, emissiveIntensity: 0.9, roughness: 0.4, metalness: 0})
+  let highlighted = null
+  const setHighlight = (part) => {
+    if (highlighted) { highlighted.mesh.material = highlighted.original; highlighted = null }
+    if (!part) return
+    stage.modelGroup.traverse((o) => { if (!highlighted && o.isMesh && !o.userData.noPick && o.name === part) highlighted = {mesh: o, original: o.material} })
+    if (highlighted) highlighted.mesh.material = hiMat
+  }
+  const askName = (part) => {
+    nameRequest = {part, suggestion: defaultLabel(part), current: labels[part] || ''}
+    setHighlight(part)
+  }
+  const clearRequest = () => { nameRequest = null; setHighlight(null) }
+
+  const tagGroup = new THREE.Group()
+  tagGroup.userData.noPick = true
+  stage.modelGroup.add(tagGroup)
+  const tagSprites = []
+  const makeTag = (text) => {
+    const c = document.createElement('canvas')
+    const g = c.getContext('2d')
+    const font = 'bold 40px "Segoe UI", system-ui, Arial, sans-serif'
+    g.font = font
+    const w = Math.ceil(g.measureText(text).width) + 44
+    const h = 68
+    c.width = w
+    c.height = h
+    g.font = font
+    g.fillStyle = '#FFEF00'
+    g.strokeStyle = '#000000'
+    g.lineWidth = 6
+    g.beginPath()
+    if (g.roundRect) g.roundRect(4, 4, w - 8, h - 8, 18); else g.rect(4, 4, w - 8, h - 8)
+    g.fill()
+    g.stroke()
+    g.fillStyle = '#000000'
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.fillText(text, w / 2, h / 2 + 2)
+    const tex = new THREE.CanvasTexture(c)
+    tex.colorSpace = THREE.SRGBColorSpace
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map: tex, depthTest: false, transparent: true, sizeAttenuation: false}))
+    sprite.userData = {aspect: w / h, noPick: true}
+    sprite.center.set(0.5, -0.3) // sits just above the point that was tapped
+    sprite.renderOrder = 997
+    return sprite
+  }
+  const scaleTags = () => {
+    if (!tagSprites.length) return
+    const ws = stage.modelGroup.getWorldScale(tmp.b).x || 1 // constant size on screen, whatever the model's scale
+    tagSprites.forEach((t) => { const h = cfg.TAG_HEIGHT / ws; t.scale.set(h * t.userData.aspect, h, 1) })
+  }
+  const syncTags = () => {
+    while (tagSprites.length) { const t = tagSprites.pop(); tagGroup.remove(t); t.material.map.dispose(); t.material.dispose() }
+    tagGroup.visible = enabled && !viewing // tags are part of Ground mode, and are not drawn on a record that is being viewed
+    Object.entries(labels).forEach(([part, name]) => {
+      const a = anchors[part]
+      if (!a) return
+      const t = makeTag(name)
+      t.position.set(a[0], a[1], a[2])
+      tagGroup.add(t)
+      tagSprites.push(t)
+    })
+    scaleTags()
   }
 
   const partName = (obj) => {
@@ -464,7 +537,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   }
 
   const dropPending = () => { if (pending) { removeClamp(pending.clamp); pending = null } }
-  const removeAll = () => { dropPending(); nameRequest = null; while (grounds.length) removeGround(grounds[0]) }
+  const removeAll = () => { dropPending(); clearRequest(); while (grounds.length) removeGround(grounds[0]) }
 
   const snapshot = () => grounds.map(g => ({id: g.id, a: endData(g.a), b: endData(g.b), placedAt: g.placedAt}))
 
@@ -474,13 +547,14 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     try {
       const empty = !grounds.length && !student && !scenario && !structure.number && !structure.line && !structure.job && !Object.keys(labels).length
       if (empty) localStorage.removeItem(storageKey)
-      else localStorage.setItem(storageKey, JSON.stringify({student, scenario, structure, labels, sessionStart, savedAt: new Date().toISOString(), grounds: snapshot()}))
+      else localStorage.setItem(storageKey, JSON.stringify({student, scenario, structure, labels, anchors, sessionStart, savedAt: new Date().toISOString(), grounds: snapshot()}))
     } catch (e) { /* storage unavailable (private window, blocked): the session simply is not kept */ }
   }
 
   const addPoint = (hit) => {
     const p = placeClamp(hit)
-    if (needsName(p.part)) nameRequest = {part: p.part, suggestion: defaultLabel(p.part)} // ask once per conductor
+    if (isConductor(p.part) && !anchors[p.part]) anchors[p.part] = round4(stage.modelGroup.worldToLocal(hit.point.clone()).toArray())
+    if (needsName(p.part)) askName(p.part) // ask once per conductor
     if (!pending) {
       pending = p
       clampKit.setPending(p.clamp, true)
@@ -493,6 +567,16 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     clampKit.setPending(first.clamp, false)
     makeGround(nextId(), first, p, new Date().toISOString())
     save()
+    emit()
+  }
+
+  // In name mode a tap on any conductor opens its name box (and moves its tag to where it was tapped).
+  const nameTap = (hit) => {
+    const part = partName(hit.object)
+    if (!isConductor(part)) { modeNote = 'That is not a conductor. Tap one of the wires.'; emit(); return }
+    modeNote = ''
+    anchors[part] = round4(stage.modelGroup.worldToLocal(hit.point.clone()).toArray())
+    askName(part)
     emit()
   }
 
@@ -524,7 +608,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
       if (!d || !enabled || viewing || nameRequest || d.id !== e.pointerId) return
       if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > cfg.TAP_MAX_MOVE_PX || performance.now() - d.t > cfg.TAP_MAX_MS) return
       const hit = hitPart(e.clientX, e.clientY, e.pointerType)
-      if (hit) addPoint(hit)
+      if (hit) { if (nameMode) nameTap(hit); else addPoint(hit) }
     }
     const onCancel = (e) => { active.delete(e.pointerId); down = null }
     el.addEventListener('pointerdown', onDown, true)
@@ -542,6 +626,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     time += dt
     stage.modelGroup.updateWorldMatrix(true, true)
     grounds.forEach(rebuildCable)
+    scaleTags()
     if (pending) pending.clamp.scale.setScalar(pending.clamp.userData.baseScale * (1 + 0.14 * Math.sin(time * 7)))
   })
 
@@ -551,8 +636,9 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     removeAll()
     viewing = null
     student = stash.student; scenario = stash.scenario; sessionStart = stash.sessionStart
-    structure = stash.structure; labels = stash.labels
+    structure = stash.structure; labels = stash.labels; anchors = stash.anchors
     stash.grounds.forEach(d => addGroundFromData(d))
+    syncTags()
     emit()
   }
 
@@ -560,7 +646,8 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     get enabled() { return enabled },
     setEnabled(on) {
       enabled = !!on
-      if (!enabled) { closeRecord(); dropPending(); nameRequest = null }
+      if (!enabled) { closeRecord(); dropPending(); clearRequest(); nameMode = false; modeNote = '' }
+      syncTags()
       emit()
     },
     attach,
@@ -569,6 +656,27 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     get pending() { return pending ? {part: pending.part, label: endLabel(pending)} : null },
     // A conductor that was just tapped and needs a name: {part, suggestion}, or null.
     get nameRequest() { return nameRequest ? {...nameRequest, choices: cfg.NAME_CHOICES} : null },
+    get nameMode() { return nameMode },
+    get modeNote() { return modeNote },
+    // Name mode: taps name conductors instead of placing clamps.
+    setNameMode(on) {
+      if (viewing) return
+      nameMode = !!on
+      modeNote = ''
+      if (nameMode) { dropPending(); clearRequest() }
+      else clearRequest()
+      emit()
+    },
+    // Open the name box for a conductor that already has a name (to change it).
+    askName(part) { if (!viewing) { askName(part); emit() } },
+    // Skip / cancel: keep the current name, or take the suggested one if there is none yet.
+    skipName() { if (nameRequest) api.setLabel(nameRequest.part, nameRequest.current || nameRequest.suggestion) },
+    // How many conductors the model has, and the ones named so far (by their given names, not part names).
+    conductorStatus() {
+      const parts = conductorParts()
+      const items = parts.filter(part => labels[part]).map(part => ({part, label: labels[part]}))
+      return {total: parts.length, named: items.length, items}
+    },
     get structure() { return {...structure} },
     // The conductors in this model with the name given to each so far ('' if none) and the suggested name.
     conductors() { return conductorParts().map(part => ({part, label: labels[part] || '', suggestion: defaultLabel(part)})) },
@@ -577,7 +685,8 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
       if (viewing) return
       const v = String(label || '').trim().slice(0, 40)
       if (v) labels[part] = v; else delete labels[part]
-      if (nameRequest && nameRequest.part === part) nameRequest = null
+      if (nameRequest && nameRequest.part === part) clearRequest()
+      syncTags()
       save(); emit()
     },
     setStructure(v) {
@@ -602,7 +711,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     // Remove the pending first clamp if there is one, otherwise the last completed ground.
     undo() {
       if (viewing) return
-      nameRequest = null
+      clearRequest()
       if (pending) dropPending(); else if (grounds.length) removeGround(grounds[grounds.length - 1])
       if (!grounds.length && !pending) sessionStart = null
       save(); emit()
@@ -622,7 +731,8 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
       viewing = null
       removeAll()
       student = ''; scenario = ''; sessionStart = null
-      structure = {number: '', line: '', job: ''}; labels = {}
+      structure = {number: '', line: '', job: ''}; labels = {}; anchors = {}; nameMode = false; modeNote = ''
+      syncTags()
       try { localStorage.removeItem(storageKey) } catch (e) { /* ignore */ }
       emit()
     },
@@ -638,6 +748,9 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
         structure = {number: String(st.number || ''), line: String(st.line || ''), job: String(st.job || '')}
         labels = {}
         Object.entries(s.labels || {}).forEach(([k, v]) => { if (typeof v === 'string' && v.trim()) labels[k] = v.trim().slice(0, 40) })
+        anchors = {}
+        Object.entries(s.anchors || {}).forEach(([k, a]) => { if (Array.isArray(a) && a.length === 3 && a.every(Number.isFinite)) anchors[k] = a })
+        syncTags()
         let count = 0
         s.grounds.forEach((d) => { try { if (addGroundFromData(d)) count++ } catch (e) { /* skip a damaged entry */ } })
         emit()
@@ -668,17 +781,22 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
       }
       const fingerprint = await Promise.resolve(modelInfo.fingerprint)
       const changed = !!(record.model.fingerprint && fingerprint && record.model.fingerprint !== fingerprint)
-      const stash = viewing ? viewing.stash : {grounds: snapshot(), student, scenario, sessionStart, structure: {...structure}, labels: {...labels}}
+      const stash = viewing ? viewing.stash : {grounds: snapshot(), student, scenario, sessionStart, structure: {...structure}, labels: {...labels}, anchors: {...anchors}}
       removeAll()
       viewing = {record, stash}
       let skipped = 0
       record.grounds.forEach((d) => { if (!addGroundFromData(d, {fixedLabel: true})) skipped++ })
+      nameMode = false; modeNote = ''
+      syncTags()
       emit()
       return {ok: true, drawn: record.grounds.length - skipped, skipped, modelChanged: changed}
     },
     closeRecord,
     destroy() {
       removeAll()
+      while (tagSprites.length) { const t = tagSprites.pop(); tagGroup.remove(t); t.material.map.dispose(); t.material.dispose() }
+      stage.modelGroup.remove(tagGroup)
+      hiMat.dispose()
       offTick()
       if (detach) detach()
       clampKit.dispose()
@@ -746,6 +864,15 @@ const CSS = `
 .gd-cond{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:8px;align-items:center;margin-top:6px}
 .gd-cond span{font-size:12px;color:#bdbdbd;overflow-wrap:anywhere}
 .gd-setup .gd-end{height:10px}
+.gd-modebar{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:8px 10px;border-radius:10px;background:#FFEF00;color:#000;font-weight:600}
+.gd-modebar[hidden]{display:none}
+.gd-modebar span{flex:1;min-width:0}
+.gd-modedone{flex:none;height:40px;padding:0 16px;border:0;border-radius:10px;background:#000;color:#FFEF00;font:700 14px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer;touch-action:manipulation}
+.gd-namemode{width:100%;height:44px;margin:8px 0 4px;border:0;border-radius:10px;background:#FFEF00;color:#000;font:700 14px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer;touch-action:manipulation}
+.gd-cstatus{font-size:12px;color:#bdbdbd}
+.gd-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.gd-chip{height:40px;padding:0 14px;border:0;border-radius:999px;background:#2a2a2a;color:#fff;font:600 14px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer;touch-action:manipulation}
+.gd-chip:active{background:#444}
 .gd-msg{font-weight:600;font-size:15px;min-height:22px;overflow-wrap:anywhere}
 .gd-msg b{color:#FFEF00}
 .gd-note{margin-top:6px;padding:6px 10px;border-radius:8px;background:#222;color:#d8d8d8;font-size:13px;overflow-wrap:anywhere}
@@ -800,7 +927,8 @@ export function createGroundUI(root, grounding, {
   panel.className = 'gd-panel' + (compact ? ' gd-compact' : '')
   panel.hidden = true
   panel.innerHTML = '<div class="gd-banner" hidden><span></span><button type="button" class="gd-closerec">Close record</button></div>'
-    + '<div class="gd-namebox" hidden><div class="gd-nametitle">Name this conductor<small></small></div><div class="gd-namechoices"></div>'
+    + '<div class="gd-modebar" hidden><span>Tap a wire on the model to name it.</span><button type="button" class="gd-modedone">Done</button></div>'
+    + '<div class="gd-namebox" hidden><div class="gd-nametitle"><b>Name this conductor</b><small></small></div><div class="gd-namechoices"></div>'
     + '<div class="gd-namerow"><input class="gd-nameinput" type="text" maxlength="40" placeholder="Or type the name used on this line" aria-label="Conductor name" autocomplete="off">'
     + '<button type="button" class="gd-nameok">OK</button><button type="button" class="gd-nameskip">Skip</button></div></div>'
     + '<div class="gd-session"><input class="gd-name" type="text" maxlength="60" placeholder="Student name" aria-label="Student name" autocomplete="off">'
@@ -809,8 +937,8 @@ export function createGroundUI(root, grounding, {
     + '<label>Structure / pole number<input class="gd-st-number" type="text" maxlength="60" autocomplete="off"></label>'
     + '<label>Line or circuit name<input class="gd-st-line" type="text" maxlength="80" autocomplete="off"></label>'
     + '<label>Job / work order number<input class="gd-st-job" type="text" maxlength="60" autocomplete="off"></label>'
-    + '<h4>Conductor names</h4><div class="gd-hint">Name each conductor once, using the terms for this line. Taps then use these names.</div>'
-    + '<div class="gd-conds"></div><div class="gd-end"></div></details>'
+    + '<h4>Conductor names</h4><div class="gd-hint">Tap a wire on the model to name it. You can also name a wire the first time you ground to it.</div>'
+    + '<button type="button" class="gd-namemode">Name conductors by tapping</button><div class="gd-cstatus"></div><div class="gd-chips"></div><div class="gd-end"></div></details>'
     + '<div class="gd-msg"></div><div class="gd-note" hidden></div><ul class="gd-list"></ul>'
     + '<div class="gd-btns"><button type="button" class="gd-undo">Undo last</button><button type="button" class="gd-clear">Clear all</button>'
     + '<button type="button" class="gd-morebtn" aria-expanded="false">More</button></div>'
@@ -820,7 +948,9 @@ export function createGroundUI(root, grounding, {
   root.appendChild(panel)
   const q = sel => panel.querySelector(sel)
   const banner = q('.gd-banner')
+  const modeBar = q('.gd-modebar')
   const nameBox = q('.gd-namebox')
+  const nameHead = q('.gd-nametitle b')
   const nameTitle = q('.gd-nametitle small')
   const nameChoices = q('.gd-namechoices')
   const nameInput = q('.gd-nameinput')
@@ -831,7 +961,9 @@ export function createGroundUI(root, grounding, {
   const stNumber = q('.gd-st-number')
   const stLine = q('.gd-st-line')
   const stJob = q('.gd-st-job')
-  const conds = q('.gd-conds')
+  const nameModeBtn = q('.gd-namemode')
+  const cstatus = q('.gd-cstatus')
+  const chips = q('.gd-chips')
   const msg = q('.gd-msg')
   const note = q('.gd-note')
   const list = q('.gd-list')
@@ -852,14 +984,16 @@ export function createGroundUI(root, grounding, {
   const touchScreen = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
 
   let shownRequest = '' // which conductor the name box is currently built for
-  let shownConds = '' // which conductors the setup list is currently built for
 
   const renderNameBox = (req) => {
     nameBox.hidden = !req
     if (!req) { shownRequest = ''; return }
-    if (shownRequest === req.part) return // already built (keep what the user is typing)
-    shownRequest = req.part
-    nameTitle.textContent = `(${req.part})`
+    const key = `${req.part}|${req.current}`
+    if (shownRequest === key) return // already built (keep what the user is typing)
+    shownRequest = key
+    nameHead.textContent = req.current ? 'Rename this conductor' : 'Name this conductor'
+    nameTitle.textContent = req.current ? `(now "${req.current}")` : ''
+    q('.gd-nameskip').textContent = req.current ? 'Cancel' : 'Skip'
     nameChoices.textContent = ''
     const choices = req.choices.includes(req.suggestion) ? req.choices : [req.suggestion, ...req.choices]
     choices.forEach((c) => {
@@ -867,8 +1001,8 @@ export function createGroundUI(root, grounding, {
       b.type = 'button'
       b.addEventListener('click', () => grounding.setLabel(req.part, c))
     })
-    nameInput.value = ''
-    if (!touchScreen) nameInput.focus() // a phone keyboard would cover the model; the quick buttons come first there
+    nameInput.value = req.current
+    if (!touchScreen) { nameInput.focus(); nameInput.select() } // a phone keyboard would cover the model; the quick buttons come first there
   }
 
   const renderSetup = (view) => {
@@ -877,29 +1011,15 @@ export function createGroundUI(root, grounding, {
     if (document.activeElement !== stNumber) stNumber.value = st.number
     if (document.activeElement !== stLine) stLine.value = st.line
     if (document.activeElement !== stJob) stJob.value = st.job
-    const parts = grounding.conductors()
-    const key = parts.map(p => p.part).join('|')
-    if (key !== shownConds) { // build the rows once per set of conductors
-      shownConds = key
-      conds.textContent = ''
-      parts.forEach((c) => {
-        const row = document.createElement('div')
-        row.className = 'gd-cond'
-        text(row, 'span', '', c.part)
-        const input = document.createElement('input')
-        input.type = 'text'
-        input.maxLength = 40
-        input.placeholder = c.suggestion
-        input.setAttribute('aria-label', `Name for ${c.part}`)
-        input.dataset.part = c.part
-        input.addEventListener('input', () => grounding.setLabel(c.part, input.value))
-        row.appendChild(input)
-        conds.appendChild(row)
-      })
-    }
-    parts.forEach((c) => {
-      const input = conds.querySelector(`input[data-part="${c.part}"]`)
-      if (input && document.activeElement !== input) input.value = c.label
+    const status = grounding.conductorStatus()
+    cstatus.textContent = status.total ? `${status.named} of ${status.total} conductors named` : ''
+    nameModeBtn.textContent = grounding.nameMode ? 'Done naming' : (status.named ? 'Name or rename conductors by tapping' : 'Name conductors by tapping')
+    chips.textContent = ''
+    status.items.forEach((c) => {
+      const b = text(chips, 'button', 'gd-chip', `${c.label}  ✎`)
+      b.type = 'button'
+      b.setAttribute('aria-label', `Rename ${c.label}`)
+      b.addEventListener('click', () => grounding.askName(c.part))
     })
   }
 
@@ -921,12 +1041,15 @@ export function createGroundUI(root, grounding, {
     if (document.activeElement !== scnIn) scnIn.value = grounding.scenario
     renderNameBox(req)
     renderSetup(view)
+    modeBar.hidden = !(grounding.nameMode && !view)
     // the instruction line
     msg.textContent = ''
     if (view) {
       msg.textContent = `${items.length} ground${items.length === 1 ? '' : 's'} in this record.`
     } else if (req) {
-      msg.textContent = 'Name the conductor you just tapped, then carry on.'
+      msg.textContent = 'Name the highlighted conductor, then carry on.'
+    } else if (grounding.nameMode) {
+      msg.textContent = grounding.modeNote || 'Tap any conductor (a wire) on the model.'
     } else if (pending) {
       msg.append('Clamp 1 on ')
       text(msg, 'b', '', pending.label)
@@ -997,7 +1120,14 @@ export function createGroundUI(root, grounding, {
   }
   q('.gd-nameok').addEventListener('click', confirmName)
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); confirmName() } })
-  q('.gd-nameskip').addEventListener('click', () => { const req = grounding.nameRequest; if (req) grounding.setLabel(req.part, req.suggestion) })
+  q('.gd-nameskip').addEventListener('click', () => grounding.skipName())
+  const toggleNameMode = () => {
+    const on = !grounding.nameMode
+    grounding.setNameMode(on)
+    if (on) { setup.open = false; setMore(false); showNote('') } // clear the way so the model can be tapped
+  }
+  nameModeBtn.addEventListener('click', toggleNameMode)
+  q('.gd-modedone').addEventListener('click', () => grounding.setNameMode(false))
 
   exportBtn.addEventListener('click', async () => {
     const r = await grounding.exportRecord()
@@ -1031,7 +1161,7 @@ export function createGroundUI(root, grounding, {
   freshBtn.addEventListener('click', () => {
     const st = grounding.structure
     const has = grounding.list().length || grounding.pending || grounding.student || grounding.scenario
-      || st.number || st.line || st.job || grounding.conductors().some(c => c.label)
+      || st.number || st.line || st.job || grounding.conductorStatus().named
     if (has && !window.confirm('Start fresh? This clears the grounds, the student name, the structure details and the conductor names on this device. Export the record first if you need it.')) return
     grounding.startFresh()
     showNote('Started a new session.')
