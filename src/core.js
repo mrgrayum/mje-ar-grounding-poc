@@ -700,14 +700,16 @@ export class MarkerTour {
     if (y < 8) y = my + gap // not enough room above: show below the marker
     x = Math.min(Math.max(x, 8), Math.max(W - cw - 8, 8))
     y = Math.min(Math.max(y, 8), Math.max(H - ch - 8, 8))
-    // While the card is moving it follows the marker to a fraction of a pixel (whole-pixel steps look like shimmer);
-    // once it settles it snaps to whole pixels so the text stays sharp.
+    // While the card is moving, including the slow tail as the model coasts to a stop, it follows the marker to a
+    // fraction of a pixel (whole-pixel steps would hop against the smoothly gliding marker and look like shaking).
+    // Only once it has been completely still for a quarter of a second does it snap to whole pixels so text is sharp.
     const last = this._lastXY
-    const moving = !last || Math.abs(x - last[0]) > 0.02 || Math.abs(y - last[1]) > 0.02
+    const still = last && Math.abs(x - last[0]) < 0.003 && Math.abs(y - last[1]) < 0.003
+    this._stillFrames = still ? (this._stillFrames || 0) + 1 : 0
     this._lastXY = [x, y]
-    this.card.style.transform = moving
-      ? `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`
-      : `translate(${Math.round(x)}px, ${Math.round(y)}px)`
+    this.card.style.transform = this._stillFrames >= 15
+      ? `translate(${Math.round(x)}px, ${Math.round(y)}px)`
+      : `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`
   }
 
   dispose() {
