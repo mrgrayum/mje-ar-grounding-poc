@@ -85,9 +85,9 @@ const makeFittingBuilder = () => {
   const copper = new THREE.MeshStandardMaterial({color: 0xb87333, roughness: 0.4, metalness: 0.7})
   const dark = new THREE.MeshStandardMaterial({color: 0x222222, roughness: 0.6, metalness: 0.3})
   const glow = new THREE.MeshStandardMaterial({color: GROUND_CONFIG.CLAMP_COLOR, roughness: 0.45, metalness: 0.1, emissive: 0xFFEF00, emissiveIntensity: 0.6}) // waiting for its cable
-  const gArm = new THREE.BoxGeometry(0.32, 0.36, 1) // a side of the U (stretched to its length)
-  const gCross = new THREE.BoxGeometry(1, 0.36, 0.32) // the cross bar of the U (stretched to its width)
-  const gLink = new THREE.TorusGeometry(0.1, 0.04, 6, 12).scale(1.5, 1, 1) // one chain link, long side along x
+  const gArm = new THREE.BoxGeometry(0.5, 0.5, 1) // a side of the U (stretched to its length)
+  const gCross = new THREE.BoxGeometry(1, 0.5, 0.5) // the cross bar of the U (stretched to its width)
+  const gLink = new THREE.TorusGeometry(0.15, 0.065, 6, 12).scale(1.5, 1, 1) // one chain link, long side along x
   const gRod = new THREE.CylinderGeometry(0.15, 0.15, 4.2, 12) // from 1.2 below the ground to 3 above it
   const gCap = new THREE.SphereGeometry(0.3, 12, 8)
   const gEye = new THREE.TorusGeometry(0.28, 0.07, 8, 16)
@@ -98,21 +98,21 @@ const makeFittingBuilder = () => {
   // poleR = radius of the pole at this spot in the bracket's units, so the chain goes round it exactly.
   const buildBracket = (poleR = 1.4) => {
     const g = new THREE.Group()
-    const hw = Math.min(0.75, poleR * 0.9) // half the width of the U
+    const hw = Math.min(0.85, poleR * 0.9) // half the width of the U
     const z0 = -(poleR - Math.sqrt(poleR * poleR - hw * hw)) // where the arms meet the pole's surface
-    const zf = 1.2 // the cross bar at the far end of the U
+    const zf = 1.4 // the cross bar at the far end of the U
     const zb = z0 // the arms start on the pole's surface, where the chain ends are
     const ux = hw // the arms are where the chain ends
     const arms = [-ux, ux].map((x) => { const a = mesh(gArm, alum, true); a.scale.z = zf - zb; a.position.set(x, 0, (zf + zb) / 2); g.add(a); return a })
-    const cross = mesh(gCross, alum, true); cross.scale.x = 2 * ux + 0.32; cross.position.set(0, 0, zf); g.add(cross)
+    const cross = mesh(gCross, alum, true); cross.scale.x = 2 * ux + 0.5; cross.position.set(0, 0, zf); g.add(cross)
     // the chain: an arc of interlocking links from one arm of the U, round the back of the pole, to the other
-    const rho = poleR + 0.12
+    const rho = poleR + 0.18
     const cz = -poleR
     const phiA = Math.atan2(z0 - cz, -hw)
     let phiB = Math.atan2(z0 - cz, hw)
     while (phiB < phiA) phiB += Math.PI * 2
     const arcLen = (phiB - phiA) * rho
-    const n = Math.max(8, Math.round(arcLen / 0.27))
+    const n = Math.max(8, Math.round(arcLen / 0.4))
     const chain = new THREE.InstancedMesh(gLink, zinc, n)
     chain.userData.noPick = true
     chain.userData.fitPart = true
@@ -135,7 +135,7 @@ const makeFittingBuilder = () => {
     const samples = []
     for (let z = zb + 0.3; z <= zf + 0.001; z += 0.3) { samples.push(new THREE.Vector3(-ux, 0, z)); samples.push(new THREE.Vector3(ux, 0, z)) }
     for (let x = -ux; x <= ux + 0.001; x += 0.3) samples.push(new THREE.Vector3(x, 0, zf))
-    g.userData = {noPick: true, glowMeshes: [...arms, cross], baseMat: alum, lugs: [], radius: 2.2, axis: [0, 0, 1], chain, bracketU: {underY: -0.18, samples}}
+    g.userData = {noPick: true, glowMeshes: [...arms, cross], baseMat: alum, lugs: [], radius: 2.6, axis: [0, 0, 1], chain, bracketU: {underY: -0.25, samples}}
     return g
   }
   const buildRod = () => {
