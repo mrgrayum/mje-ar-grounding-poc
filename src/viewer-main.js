@@ -76,7 +76,8 @@ async function main() {
     const tour = new MarkerTour(stage, root)
     tour.motionLabels = data.labels || {}
     tour.setMarkers((data.markers || []).filter(m => Array.isArray(m.position) && m.position.length === 3))
-    createTourUI(root, tour, {title: lib ? '' : (data.title || '')})
+    // A library model with no markers (the grounding test pole) shows no marker menu, arrows or "No markers" text.
+    if (tour.markers.length || !lib) createTourUI(root, tour, {title: lib ? '' : (data.title || '')})
     tour.attachPicking(root)
     if (lib) addLibraryChrome(root, lib, {title: data.title || '', page: '3d', canAR: data.mode === 'ar'})
     // Ground mode (temporary protective grounding): only for models flagged "grounding": true in markers.json

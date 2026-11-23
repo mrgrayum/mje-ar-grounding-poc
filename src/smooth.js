@@ -11,13 +11,15 @@ import * as THREE from 'three'
 // posMin / rotMin: cutoff in Hz when still (lower = steadier but slower to follow). posBeta / rotBeta: how fast the cutoff
 // rises with speed (higher = follows real movement sooner). posFloor (m/s) and rotFloor (rad/s): speeds below this count as
 // "holding still", which is the hand tremor and tracking noise rather than real movement. dCut: how quickly the speed
-// estimate follows (Hz). The numbers were tuned against simulated tracking noise: calm when still, under 4 mm and 0.25 degrees
-// of lag while walking at 0.4 m/s or turning at 60 degrees per second.
+// estimate follows (Hz). deadPos (m) and deadRot (rad): a "hold still zone": the drawn view stays exactly where it is until the
+// smoothed pose has moved further than this away, then it follows (so tiny wobble never reaches the screen, but a real drift
+// or movement does). The numbers were tuned against simulated tracking noise.
 export const SMOOTH_PRESETS = {
   off: null,
   light: {posMin: 1.2, posBeta: 50, posFloor: 0.02, rotMin: 1.2, rotBeta: 50, rotFloor: 0.02, dCut: 2},
   normal: {posMin: 0.6, posBeta: 50, posFloor: 0.02, rotMin: 0.6, rotBeta: 50, rotFloor: 0.02, dCut: 2},
-  strong: {posMin: 0.3, posBeta: 40, posFloor: 0.03, rotMin: 0.3, rotBeta: 40, rotFloor: 0.03, dCut: 2},
+  strong: {posMin: 0.3, posBeta: 40, posFloor: 0.03, rotMin: 0.3, rotBeta: 40, rotFloor: 0.03, dCut: 2, deadPos: 0.002, deadRot: 0.0014},
+  max: {posMin: 0.15, posBeta: 40, posFloor: 0.03, rotMin: 0.15, rotBeta: 40, rotFloor: 0.03, dCut: 2, deadPos: 0.004, deadRot: 0.0026},
 }
 
 const D_CUTOFF = 1.0 // how quickly the speed estimate itself is smoothed (Hz)
@@ -27,16 +29,18 @@ const alphaFor = (cutoff, dt) => 1 / (1 + 1 / (2 * Math.PI * cutoff * dt))
 const JUMP_DIST = 0.5 // metres between two frames
 const JUMP_ANGLE = 0.6 // radians between two frames
 
-export function createPoseSmoother(presetName = 'normal') {
+export function createPoseSmoother(presetName = 'strong') {
   // a name from SMOOTH_PRESETS, or (for tuning tests) a settings object
   const custom = typeof presetName === 'object' && presetName !== null
   if (custom) presetName = 'custom'
-  const preset = custom ? arguments[0] : (SMOOTH_PRESETS[presetName] === undefined ? SMOOTH_PRESETS.normal : SMOOTH_PRESETS[presetName])
-  if (!SMOOTH_PRESETS[presetName] && !custom && presetName !== 'off') presetName = 'normal'
+  const preset = custom ? arguments[0] : (SMOOTH_PRESETS[presetName] === undefined ? SMOOTH_PRESETS.strong : SMOOTH_PRESETS[presetName])
+  if (!SMOOTH_PRESETS[presetName] && !custom && presetName !== 'off') presetName = 'strong'
   const fp = new THREE.Vector3()
   const fq = new THREE.Quaternion()
   const lp = new THREE.Vector3()
   const lq = new THREE.Quaternion()
+  const hp = new THREE.Vector3() // what is drawn (the smoothed pose, held inside the hold-still zone)
+  const hq = new THREE.Quaternion()
   const rawP = new THREE.Vector3()
   const rawQ = new THREE.Quaternion()
   let speedP = 0
@@ -55,7 +59,7 @@ export function createPoseSmoother(presetName = 'normal') {
       const step = Math.min(Math.max(dt, 1 / 120), 0.1)
       if (has && (rawP.distanceTo(lp) > JUMP_DIST || rawQ.angleTo(lq) > JUMP_ANGLE)) has = false
       if (!has) {
-        fp.copy(rawP); fq.copy(rawQ); lp.copy(rawP); lq.copy(rawQ)
+        fp.copy(rawP); fq.copy(rawQ); lp.copy(rawP); lq.copy(rawQ); hp.copy(rawP); hq.copy(rawQ)
         speedP = 0; speedR = 0
         has = true
         return {rawP, rawQ}
@@ -69,8 +73,14 @@ export function createPoseSmoother(presetName = 'normal') {
       fq.slerp(rawQ, alphaFor(cutR, step))
       lp.copy(rawP)
       lq.copy(rawQ)
-      cam.position.copy(fp)
-      cam.quaternion.copy(fq)
+      // hold-still zone: the drawn pose only moves once the smoothed pose has left a small zone around it, and then just
+      // enough to keep the smoothed pose at the edge of the zone
+      const dp = fp.distanceTo(hp)
+      if (dp > (preset.deadPos || 0)) hp.lerp(fp, 1 - (preset.deadPos || 0) / dp)
+      const dr = fq.angleTo(hq)
+      if (dr > (preset.deadRot || 0)) hq.slerp(fq, 1 - (preset.deadRot || 0) / dr)
+      cam.position.copy(hp)
+      cam.quaternion.copy(hq)
       return {rawP, rawQ}
     },
   }

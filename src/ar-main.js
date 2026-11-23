@@ -126,6 +126,21 @@ if (lib) {
   ui.appendChild(switchBtn)
 }
 
+// The engine asks for permission to use the motion sensors with its own purple and grey popup. We cannot change the engine's files,
+// but its popup is plain page elements, so this restyles them (and only them) to match the rest of our screens: black panel,
+// yellow top edge, white text, a grey Cancel button and a yellow Continue button. The wording is the engine's own.
+const promptStyle = document.createElement('style')
+promptStyle.textContent = `
+.prompt-box-8w{font-family:'Segoe UI',system-ui,Arial,sans-serif!important;background:rgba(0,0,0,.94)!important;color:#fff!important;
+  border-top:4px solid #FFEF00!important;border-radius:16px!important;filter:none!important;box-shadow:0 8px 24px rgba(0,0,0,.45)!important;
+  padding:16px 14px 14px!important;width:min(20em,calc(100% - 32px))!important;font-size:17px!important}
+.prompt-box-8w p{margin:2px 4px 16px!important;font-weight:600!important;line-height:1.35!important}
+.prompt-button-8w{height:48px!important;border-radius:12px!important;background:#2a2a2a!important;color:#fff!important;
+  font-weight:700!important;font-size:15px!important;padding:0 12px!important;cursor:pointer;touch-action:manipulation}
+.prompt-button-8w.button-primary-8w{background:#FFEF00!important;color:#000!important}
+`
+document.head.appendChild(promptStyle)
+
 const onxrloaded = () => {
   const tickers = new Set()
   let tour = null
@@ -151,9 +166,9 @@ const onxrloaded = () => {
   let radius = 1
   let lastTick = performance.now()
   const camera = {ref: null}
-  // Calms the small shake of the model when the phone is held still (see smooth.js). Add &smooth=off|light|normal|strong to
+  // Calms the small shake of the model when the phone is held still (see smooth.js). Add &smooth=off|light|normal|strong|max to
   // the address to compare; &meter=1 shows frames per second and how much the camera shakes.
-  const smoother = createPoseSmoother(params.get('smooth') || 'normal')
+  const smoother = createPoseSmoother(params.get('smooth') || 'strong')
   const meter = params.get('meter') ? createShakeMeter(document.body, smoother) : null
   window.__smoother = smoother // handy for debugging and tests
 
@@ -171,8 +186,8 @@ const onxrloaded = () => {
     reticle.visible = !value
     moveBtn.style.display = value ? '' : 'none'
     if (value) {
-      showHint(grounding ? 'Drag to turn · pinch to enlarge · then press Lock & Ground' : 'Drag to turn · pinch to resize · tap a numbered marker', 6000)
-      tourUI = createTourUI(ui, tour, {title: '', showHint: false})
+      showHint(grounding ? 'Drag to turn · pinch to enlarge · then press Lock & Ground' : (tour.markers.length ? 'Drag to turn · pinch to resize · tap a numbered marker' : 'Drag to turn · pinch to resize'), 6000)
+      tourUI = tour.markers.length ? createTourUI(ui, tour, {title: '', showHint: false}) : null // no markers: no marker menu or arrows
       detachPicking = tour.attachPicking(camera.canvas)
     } else {
       if (tourUI) tourUI.destroy()
