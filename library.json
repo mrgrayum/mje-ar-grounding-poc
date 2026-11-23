@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "title": "3D & AR Model Library",
+  "models": [
+    {
+      "slug": "animated-demo-excavator",
+      "title": "Animated demo excavator",
+      "description": "Animated demo excavator. Tap the boom, stick, bucket or cab to move it.",
+      "tags": [
+        "MJ Excavating",
+        "Training",
+        "Equipment",
+        "Demo"
+      ],
+      "mode": "ar",
+      "preview": "models/animated-demo-excavator/preview.jpg",
+      "markers": 6,
+      "size": 12364,
+      "updated": "2026-11-20T17:21:26.917Z"
+    },
+    {
+      "slug": "jcb-excavator",
+      "title": "JCB Excavator",
+      "description": "A JCB excavator model. Tap the markers to see the knuckle, cab and bucket.",
+      "tags": [
+        "MJ Excavating",
+        "Equipment"
+      ],
+      "mode": "ar",
+      "preview": "models/jcb-excavator/preview.jpg",
+      "markers": 3,
+      "size": 10168860,
+      "updated": "2026-11-20T17:21:08.736Z"
+    },
+    {
+      "slug": "fire-extinguisher",
+      "title": "Fire Extinguisher",
+      "description": "A fire extinguisher with tappable callouts for the nozzle, pressure gauge and instruction label.",
+      "tags": [
+        "Safety",
+        "Equipment",
+        "Training"
+      ],
+      "mode": "ar",
+      "preview": "models/fire-extinguisher/preview.jpg",
+      "markers": 3,
+      "size": 4530140,
+      "updated": "2026-11-20T17:20:53.212Z"
+    }
+  ],
+  "updated": "2026-11-20T17:21:27.003Z"
+}

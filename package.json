@@ -1,0 +1,17 @@
+{
+  "name": "mje-ar-grounding-poc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Proof of concept: temporary protective grounding in AR and 3D, built on the MJE AR model library.",
+  "scripts": {
+    "build": "node build-web.mjs",
+    "serve": "node serve.mjs"
+  },
+  "dependencies": {
+    "qrcode-generator": "2.0.4",
+    "three": "0.172.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

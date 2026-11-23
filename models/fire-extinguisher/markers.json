@@ -1,0 +1,90 @@
+{
+  "version": 2,
+  "title": "Fire Extinguisher",
+  "mode": "ar",
+  "model": "model.glb",
+  "markers": [
+    {
+      "id": "mmwmkglm1hu5o",
+      "title": "Nozzle",
+      "message": "Test nozzle comment box.",
+      "position": [
+        -0.4401,
+        -0.762,
+        0.0505
+      ],
+      "normal": [
+        -0.7702,
+        0.1396,
+        0.6224
+      ],
+      "view": {
+        "position": [
+          -1.1395,
+          -1.5409,
+          1.0533
+        ],
+        "target": [
+          -0.2508,
+          -0.4938,
+          0.0526
+        ]
+      }
+    },
+    {
+      "id": "mmwmkhmo2wd56",
+      "title": "Pressure Gauge",
+      "message": "Test pressure gauge comment box.",
+      "position": [
+        0.0367,
+        0.7103,
+        0.1548
+      ],
+      "normal": [
+        0.0007,
+        0.0081,
+        1
+      ],
+      "view": {
+        "position": [
+          0.162,
+          1.014,
+          1.4658
+        ],
+        "target": [
+          -0.0426,
+          0.4791,
+          -0.0435
+        ]
+      }
+    },
+    {
+      "id": "mmwmkikmsu2zg",
+      "title": "Instruction Label",
+      "message": "Test instruction label comment box.",
+      "position": [
+        0.0135,
+        -0.0379,
+        0.2919
+      ],
+      "normal": [
+        -0.1285,
+        -0.0082,
+        0.9917
+      ],
+      "view": {
+        "position": [
+          -0.3055,
+          0.4717,
+          2.1147
+        ],
+        "target": [
+          -0.0572,
+          -0.0441,
+          0.2172
+        ]
+      }
+    }
+  ],
+  "arSize": 0.75
+}

@@ -1,0 +1,167 @@
+{
+  "version": 2,
+  "title": "Animated demo excavator",
+  "mode": "ar",
+  "model": "model.glb",
+  "markers": [
+    {
+      "id": "mmwnolo0zgxcz",
+      "title": "Boom",
+      "message": "The boom raises and lowers the whole arm.",
+      "position": [
+        0.2392,
+        2.2373,
+        3.5937
+      ],
+      "normal": [
+        1,
+        0,
+        0
+      ],
+      "attach": {
+        "node": "Boom",
+        "local": [
+          0.2392,
+          0.0487,
+          2.3553
+        ]
+      },
+      "action": {
+        "clip": "BoomUp",
+        "mode": "toggle",
+        "tap": true
+      }
+    },
+    {
+      "id": "mmwnolo1od1h9",
+      "title": "Stick",
+      "message": "The stick curls the bucket in toward the machine.",
+      "position": [
+        0.0029,
+        1.302,
+        5.5663
+      ],
+      "normal": [
+        0,
+        0.4067,
+        0.9135
+      ],
+      "attach": {
+        "node": "Stick",
+        "local": [
+          0.0029,
+          0.2142,
+          1.3503
+        ]
+      },
+      "action": {
+        "clip": "StickCurl",
+        "mode": "toggle",
+        "tap": true,
+        "label": "Curl it in!"
+      }
+    },
+    {
+      "id": "mmwnolo2ima9d",
+      "title": "Bucket",
+      "message": "The bucket does the digging.",
+      "position": [
+        0.0885,
+        0.0707,
+        6.1793
+      ],
+      "normal": [
+        0,
+        -0.3584,
+        0.9336
+      ],
+      "attach": {
+        "node": "Bucket",
+        "local": [
+          0.0885,
+          0.5642,
+          0.1776
+        ]
+      },
+      "action": {
+        "clip": "BucketCurl",
+        "mode": "toggle",
+        "tap": true
+      }
+    },
+    {
+      "id": "mmwnolo3emuqe",
+      "title": "Cab",
+      "message": "The cab swings on the turret. Tap the button to swing it.",
+      "position": [
+        -0.4319,
+        2.038,
+        0.8642
+      ],
+      "normal": [
+        0,
+        0,
+        1
+      ],
+      "attach": {
+        "node": "Turret",
+        "local": [
+          -0.4319,
+          1.038,
+          0.8642
+        ]
+      },
+      "action": {
+        "clip": "CabSwing",
+        "mode": "toggle",
+        "auto": false,
+        "tap": true
+      }
+    },
+    {
+      "id": "mmwnolo49f1cm",
+      "title": "Undercarriage",
+      "message": "This marker has no motion.",
+      "position": [
+        0.0317,
+        0.6247,
+        1.7142
+      ],
+      "normal": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "id": "dig",
+      "title": "Dig cycle (repeats)",
+      "message": "A full dig, lift and return cycle that repeats while this marker is open. Closing the marker pauses it.",
+      "position": [
+        0,
+        1.9,
+        -1.2
+      ],
+      "attach": {
+        "node": "Turret",
+        "local": [
+          0,
+          0.9,
+          -1.2
+        ]
+      },
+      "action": {
+        "clip": "DigCycle",
+        "mode": "loop"
+      }
+    }
+  ],
+  "arSize": 1.23,
+  "labels": {
+    "BoomUp": "Raise the boom",
+    "StickCurl": "Curl the stick in",
+    "CabSwing": "Swing the cab",
+    "BucketCurl": "Curl the bucket",
+    "DigCycle": "Run dig cycle"
+  }
+}
