@@ -182,6 +182,7 @@ export function createStage(container, {dracoPath = 'draco/'} = {}) {
   let animator = null
   let home = {pos: new THREE.Vector3(2, 1.5, 3), target: new THREE.Vector3()}
   const tickers = new Set()
+  const lateTickers = new Set() // run after the camera has finished moving for this frame, just before drawing
 
   const resize = () => {
     const w = Math.max(container.clientWidth, 1)
@@ -252,6 +253,8 @@ export function createStage(container, {dracoPath = 'draco/'} = {}) {
     if (animator) animator.update(Math.min(raw, 0.5))
     tickers.forEach(fn => fn(dt))
     controls.update()
+    camera.updateMatrixWorld() // the camera's final position for this frame (rotating, coasting, flying)
+    lateTickers.forEach(fn => fn(dt))
     renderer.render(scene, camera)
   }
   raf = requestAnimationFrame(loop)
@@ -269,6 +272,7 @@ export function createStage(container, {dracoPath = 'draco/'} = {}) {
     loadModel,
     resetView,
     onTick(fn) { tickers.add(fn); return () => tickers.delete(fn) },
+    onLateTick(fn) { lateTickers.add(fn); return () => lateTickers.delete(fn) },
     dispose() {
       cancelAnimationFrame(raf)
       ro.disconnect()
@@ -333,6 +337,17 @@ export class MarkerTour {
     ;(root || stage.scene).add(this.group)
     this._buildCard()
     this._offTick = stage.onTick(dt => this.update(dt))
+    // Where the message card goes depends on the camera, which only reaches its final position for the frame AFTER
+    // the normal per-frame work. Placing the card in that late step keeps it glued to its marker while the model is
+    // rotated, flown or coasting to a stop (placed earlier it trailed the marker by one frame and appeared to shake).
+    // The AR page has no such late step (its camera is already final when it runs), so it keeps the old order.
+    this._late = typeof stage.onLateTick === 'function'
+    this._offLate = this._late
+      ? stage.onLateTick(() => {
+        stage.camera.matrixWorldInverse.copy(stage.camera.matrixWorld).invert()
+        this._positionCard()
+      })
+      : null
     this._cancelFly = () => { this._fly = null }
     stage.controls.addEventListener('start', this._cancelFly)
   }
@@ -637,7 +652,7 @@ export class MarkerTour {
       controls.target.lerpVectors(f.fromTarget, f.toTarget, k)
       if (f.t >= f.ms) this._fly = null
     }
-    this._positionCard()
+    if (!this._late) this._positionCard()
   }
 
   _positionCard() {
@@ -685,11 +700,19 @@ export class MarkerTour {
     if (y < 8) y = my + gap // not enough room above: show below the marker
     x = Math.min(Math.max(x, 8), Math.max(W - cw - 8, 8))
     y = Math.min(Math.max(y, 8), Math.max(H - ch - 8, 8))
-    this.card.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`
+    // While the card is moving it follows the marker to a fraction of a pixel (whole-pixel steps look like shimmer);
+    // once it settles it snaps to whole pixels so the text stays sharp.
+    const last = this._lastXY
+    const moving = !last || Math.abs(x - last[0]) > 0.02 || Math.abs(y - last[1]) > 0.02
+    this._lastXY = [x, y]
+    this.card.style.transform = moving
+      ? `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`
+      : `translate(${Math.round(x)}px, ${Math.round(y)}px)`
   }
 
   dispose() {
     this._offTick()
+    if (this._offLate) this._offLate()
     this.stage.controls.removeEventListener('start', this._cancelFly)
     this.card.remove()
     this.arrow.remove()
