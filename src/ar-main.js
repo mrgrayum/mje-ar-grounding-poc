@@ -8,6 +8,7 @@ import {createSplash} from './splash.js'
 import {libContext, addLibraryChrome} from './libchrome.js'
 import {createGrounding, createGroundUI} from './grounding.js'
 import {fingerprintOf} from './grounding-record.js'
+import {createPoseSmoother, createShakeMeter} from './smooth.js'
 
 // The engine's Three.js module reads THREE from the window.
 window.THREE = THREE
@@ -150,6 +151,11 @@ const onxrloaded = () => {
   let radius = 1
   let lastTick = performance.now()
   const camera = {ref: null}
+  // Calms the small shake of the model when the phone is held still (see smooth.js). Add &smooth=off|light|normal|strong to
+  // the address to compare; &meter=1 shows frames per second and how much the camera shakes.
+  const smoother = createPoseSmoother(params.get('smooth') || 'normal')
+  const meter = params.get('meter') ? createShakeMeter(document.body, smoother) : null
+  window.__smoother = smoother // handy for debugging and tests
 
   const moveBtn = document.createElement('button')
   moveBtn.className = 'mk-menu-btn'
@@ -181,6 +187,7 @@ const onxrloaded = () => {
 
   moveBtn.addEventListener('click', () => {
     if (window.XR8 && XR8.XrController && XR8.XrController.recenter) XR8.XrController.recenter()
+    smoother.reset()
     setPlaced(false)
   })
   moveBtn.addEventListener('pointerdown', e => e.stopPropagation())
@@ -219,7 +226,7 @@ const onxrloaded = () => {
 
       // Camera starts ~1.4 m above the floor; the floor is the y = 0 plane.
       cam.position.set(0, 1.4, 0)
-      XR8.XrController.updateCameraProjectionMatrix({origin: cam.position, facing: cam.quaternion})
+      XR8.XrController.updateCameraProjectionMatrix({origin: cam.position.clone(), facing: cam.quaternion.clone()})
 
       canvas.addEventListener('touchmove', e => e.preventDefault(), {passive: false})
       showHint('Loading model…')
@@ -345,6 +352,12 @@ const onxrloaded = () => {
     onUpdate: () => {
       const cam = camera.ref
       if (!cam) return
+      const now = performance.now()
+      const dt = Math.min(Math.max((now - lastTick) / 1000, 0), 0.5) // real frame time so motion speed is steady
+      lastTick = now
+      // Smooth the camera pose the engine just set, before anything below uses it (reticle, cards, taps, drawing).
+      const pose = smoother.apply(cam, dt)
+      if (meter) meter.sample(pose, cam, now)
       if (!placed) {
         // Reticle: where the center of the screen meets the floor.
         const ray = new THREE.Raycaster()
@@ -355,9 +368,6 @@ const onxrloaded = () => {
         reticle.visible = ok && ready
         if (ok) reticle.position.copy(hit)
       }
-      const now = performance.now()
-      const dt = Math.min(Math.max((now - lastTick) / 1000, 0), 0.5) // real frame time so motion speed is steady
-      lastTick = now
       tickers.forEach(fn => fn(dt))
     },
   }
