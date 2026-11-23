@@ -154,7 +154,9 @@ const onxrloaded = () => {
   const moveBtn = document.createElement('button')
   moveBtn.className = 'mk-menu-btn'
   moveBtn.textContent = 'Move model'
-  moveBtn.style.cssText = `top:calc(${lib ? 112 : 64}px + env(safe-area-inset-top));display:none`
+  // pointer-events: the AR overlay ignores touches (so the camera view underneath gets them), and buttons directly in
+  // it must opt back in. Without this the button was drawn but touches passed straight through it.
+  moveBtn.style.cssText = `top:calc(${lib ? 112 : 64}px + env(safe-area-inset-top));display:none;pointer-events:auto;touch-action:manipulation`
   ui.appendChild(moveBtn)
 
   const setPlaced = (value) => {
