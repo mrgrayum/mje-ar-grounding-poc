@@ -39,7 +39,7 @@ The Windows authoring app's **Publish to library** rewrites `viewer.js`, `ar.js`
 
 | Stage | Date | What changed | Verified by the project owner |
 |---|---|---|---|
-| 0. New repo and verified baseline | 2026-11-23 | Repository created from the live library `mje-ar` at commit `bedfd17`. Copy matches the original file for file (54 files, same hashes). Added the web source (`src/`), `build-web.mjs` (rebuilt bundles are byte-identical to the published ones), `serve.mjs`, this README. No behaviour changes. | Pending |
+| 0. New repo and verified baseline | 2026-11-23 | Repository created from the live library `mje-ar` at commit `bedfd17`. Copy matches the original file for file (54 files, same hashes). Added the web source (`src/`), `build-web.mjs` (rebuilt bundles are byte-identical to the published ones), `serve.mjs`, this README. No behaviour changes. | 2026-11-23: all four checks passed (library and demo models, 3D page with markers and tour, iPhone AR placement, original site unchanged). |
 | 1. Test structure with named parts | | | |
 | 2. Ground mode in the 3D viewer | | | |
 | 3. Session record: save, export, reload | | | |
