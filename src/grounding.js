@@ -71,35 +71,75 @@ const makeClampBuilder = () => {
   return {build, setPending, dispose: () => { [yellow, glow, black, gBody, gBolt, gEye].forEach(x => x.dispose()) }}
 }
 
-// ---- the cluster bracket and the ground rod, built from simple shapes ----------------------------------------
-// Cluster bracket frame: +Z points away from the pole, +Y is up. Unit size 1 = FITTING_SIZE x the model's radius. It is a
-// steel plate with six studs, and each ground cable is fastened to its own stud. Ground rod frame: +Y is up and the
-// origin is where the rod goes into the ground; the cable is fastened to the eye on top.
+// ---- the cluster bar and the ground rod, built from simple shapes ----------------------------------------
+// Cluster bar frame (the "bracket"): +Z points away from the pole, +Y is up. Unit size 1 = FITTING_SIZE x the model's
+// radius. It looks like the pole-mounted cluster bars used on wood poles: a gray aluminum body held on the pole by a
+// chain that goes all the way round it, with a pin on one side and a screw tensioner on the other, and six bronze
+// terminal studs where the ground cables are fastened (one cable per stud). Ground rod frame: +Y is up and the origin
+// is where the rod goes into the ground; the cable is fastened to the eye on top.
 const makeFittingBuilder = () => {
-  const steel = new THREE.MeshStandardMaterial({color: 0x9aa3a8, roughness: 0.5, metalness: 0.6})
+  const alum = new THREE.MeshStandardMaterial({color: 0xb4b9bd, roughness: 0.55, metalness: 0.55})
+  const zinc = new THREE.MeshStandardMaterial({color: 0xaeb6bd, roughness: 0.45, metalness: 0.8}) // the chain
+  const bronze = new THREE.MeshStandardMaterial({color: 0xc08a4a, roughness: 0.4, metalness: 0.75})
   const copper = new THREE.MeshStandardMaterial({color: 0xb87333, roughness: 0.4, metalness: 0.7})
   const dark = new THREE.MeshStandardMaterial({color: 0x222222, roughness: 0.6, metalness: 0.3})
   const glow = new THREE.MeshStandardMaterial({color: GROUND_CONFIG.CLAMP_COLOR, roughness: 0.45, metalness: 0.1, emissive: 0xFFEF00, emissiveIntensity: 0.6}) // waiting for its cable
-  const gPlate = new THREE.BoxGeometry(0.8, 5.8, 0.24)
-  const gStud = new THREE.CylinderGeometry(0.13, 0.13, 0.9, 10).rotateX(Math.PI / 2)
-  const gNut = new THREE.CylinderGeometry(0.24, 0.24, 0.16, 6).rotateX(Math.PI / 2)
+  const gBody = new THREE.BoxGeometry(0.9, 5.4, 0.6)
+  const gFlange = new THREE.BoxGeometry(1.15, 0.18, 0.72)
+  const gPlate = new THREE.BoxGeometry(0.6, 3.8, 0.06)
+  const gStud = new THREE.CylinderGeometry(0.14, 0.14, 0.75, 12).rotateX(Math.PI / 2)
+  const gNut = new THREE.CylinderGeometry(0.26, 0.26, 0.2, 6).rotateX(Math.PI / 2)
+  const gPin = new THREE.CylinderGeometry(0.1, 0.1, 0.9, 10).rotateZ(Math.PI / 2)
+  const gPinEnd = new THREE.SphereGeometry(0.17, 10, 8)
+  const gKnob = new THREE.CylinderGeometry(0.28, 0.28, 0.16, 14).rotateZ(Math.PI / 2)
+  const gLink = new THREE.TorusGeometry(0.1, 0.04, 6, 12).scale(1.5, 1, 1) // one chain link, long side along x
   const gRod = new THREE.CylinderGeometry(0.15, 0.15, 4.2, 12) // from 1.2 below the ground to 3 above it
   const gCap = new THREE.SphereGeometry(0.3, 12, 8)
   const gEye = new THREE.TorusGeometry(0.28, 0.07, 8, 16)
   const gPad = new THREE.CylinderGeometry(1.2, 1.2, 0.04, 24)
   const mesh = (geo, mat) => { const m = new THREE.Mesh(geo, mat); m.userData.noPick = true; return m }
-  const buildBracket = () => {
+
+  // poleR: the radius of the pole at this spot, in the bar's own units, so the chain goes round the pole exactly.
+  const buildBracket = (poleR = 1.4) => {
     const g = new THREE.Group()
-    const plate = mesh(gPlate, steel); plate.position.z = 0.12; g.add(plate)
+    const body = mesh(gBody, alum); body.position.z = 0.4; g.add(body)
+    ;[2.75, -2.75].forEach((y) => { const f = mesh(gFlange, alum); f.position.set(0, y, 0.43); g.add(f) })
+    const plate = mesh(gPlate, dark); plate.position.set(0, 0, 0.72); g.add(plate) // the maker's plate, a darker panel the studs stand on
+    // the chain: a ring of interlocking links round the pole at the middle of the bar, hidden behind the body at the front
+    const ringR = poleR + 0.11
+    const n = Math.max(12, Math.round((2 * Math.PI * ringR) / 0.27))
+    const chain = new THREE.InstancedMesh(gLink, zinc, n)
+    chain.userData.noPick = true
+    chain.frustumCulled = false
+    const up = new THREE.Vector3(0, 1, 0)
+    const m4 = new THREE.Matrix4()
+    const q = new THREE.Quaternion()
+    for (let k = 0; k < n; k++) {
+      const th = (k / n) * Math.PI * 2
+      const r = new THREE.Vector3(Math.sin(th), 0, Math.cos(th)) // outward from the pole's middle
+      const t = new THREE.Vector3(Math.cos(th), 0, -Math.sin(th)) // along the chain
+      const zAxis = k % 2 ? r : up // every second link is turned a quarter turn
+      const yAxis = new THREE.Vector3().crossVectors(zAxis, t)
+      q.setFromRotationMatrix(m4.makeBasis(t, yAxis, zAxis))
+      m4.compose(new THREE.Vector3(0, 0, -poleR).addScaledVector(r, ringR), q, new THREE.Vector3(1, 1, 1))
+      chain.setMatrixAt(k, m4)
+    }
+    g.add(chain)
+    // the pin on one side and the screw tensioner (a rod with a round knob) on the other
+    const pin = mesh(gPin, bronze); pin.position.set(-0.9, 0.35, 0.35); g.add(pin)
+    const pinEnd = mesh(gPinEnd, bronze); pinEnd.position.set(-1.38, 0.35, 0.35); g.add(pinEnd)
+    const screw = mesh(gPin, zinc); screw.position.set(0.9, 0.35, 0.35); g.add(screw)
+    const knob = mesh(gKnob, bronze); knob.position.set(1.4, 0.35, 0.35); g.add(knob)
+    // six bronze terminal studs, one for each cable
     const lugs = []
     for (let i = 0; i < GROUND_CONFIG.BRACKET_LUGS; i++) {
       const y = (2.5 - i) * 0.85
-      const stud = mesh(gStud, dark); stud.position.set(0, y, 0.69); g.add(stud)
-      const nut = mesh(gNut, steel); nut.position.set(0, y, 0.45); g.add(nut)
-      const lug = new THREE.Object3D(); lug.position.set(0, y, 1.15); g.add(lug) // where a cable is fastened
+      const stud = mesh(gStud, bronze); stud.position.set(0, y, 1.09); g.add(stud)
+      const nut = mesh(gNut, bronze); nut.position.set(0, y, 0.88); g.add(nut)
+      const lug = new THREE.Object3D(); lug.position.set(0, y, 1.45); g.add(lug) // where a cable is fastened
       lugs.push(lug)
     }
-    g.userData = {noPick: true, main: plate, baseMat: steel, lugs, radius: 3.2, axis: [0, 0, 1]}
+    g.userData = {noPick: true, main: body, baseMat: alum, lugs, radius: 3.2, axis: [0, 0, 1], chain}
     return g
   }
   const buildRod = () => {
@@ -113,7 +153,7 @@ const makeFittingBuilder = () => {
     return g
   }
   const setPending = (f, on) => { f.group.userData.main.material = on ? glow : f.group.userData.baseMat }
-  return {buildBracket, buildRod, setPending, glow, dispose: () => { [steel, copper, dark, glow, gPlate, gStud, gNut, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
+  return {buildBracket, buildRod, setPending, glow, disposeOne: (g) => { if (g.userData.chain) g.userData.chain.dispose() }, dispose: () => { [alum, zinc, bronze, copper, dark, glow, gBody, gFlange, gPlate, gStud, gNut, gPin, gPinEnd, gKnob, gLink, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
 }
 
 // ---- main factory ---------------------------------------------------------------------------------
@@ -626,6 +666,20 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     return f
   }
 
+  // How wide the pole is at a spot (its radius, in the units the bracket is built in), so the chain fits round it.
+  const poleRadiusUnits = (pointWorld) => {
+    if (!colliders) buildColliders()
+    const p = stage.modelGroup.worldToLocal(pointWorld.clone())
+    let best = null
+    for (const c of colliders) {
+      if (p.y < c.minY || p.y > c.maxY) continue
+      const d = Math.hypot(p.x - c.cx, p.z - c.cz)
+      const err = Math.abs(d - radiusAt(c, p.y))
+      if (!best || err < best.err) best = {d, err}
+    }
+    return best ? Math.min(Math.max(best.d / (cfg.FITTING_SIZE * stage.radius), 0.6), 8) : 1.4
+  }
+
   // A cluster bracket on a part (the pole) at a world point, plate flat against the surface, studs pointing straight out
   // from the pole and level, upright. normalWorld is only used for its sideways direction.
   const makeBracket = (node, pointWorld, normalWorld, {id, placedAt, label} = {}) => {
@@ -639,7 +693,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     const yL = dirToLocal(node, up)
     yL.addScaledVector(zL, -yL.dot(zL)).normalize()
     const xL = yL.clone().cross(zL)
-    const group = fittingKit.buildBracket()
+    const group = fittingKit.buildBracket(poleRadiusUnits(pointWorld))
     group.position.copy(node.worldToLocal(pointWorld.clone()))
     group.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xL, yL, zL))
     group.scale.setScalar(clampScaleFor(node) * (cfg.FITTING_SIZE / cfg.CLAMP_SIZE))
@@ -689,6 +743,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     grounds.filter(g => g.a.fitting === f || g.b.fitting === f).forEach(g => removeGround(g))
     if (pending && pending.kind === 'fitting' && pending.fitting === f) pending = null
     if (f.group.parent) f.group.parent.remove(f.group)
+    fittingKit.disposeOne(f.group)
   }
 
   // ---- adding and removing ----------------------------------------------------------------------
