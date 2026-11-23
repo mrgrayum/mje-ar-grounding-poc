@@ -3,6 +3,20 @@
   "title": "3D & AR Model Library",
   "models": [
     {
+      "slug": "test-pole-structure",
+      "title": "Test Pole Structure",
+      "description": "Training test structure with separately named parts: pole, crossarm, insulators, three phase conductors, ground lead and ground point.",
+      "tags": [
+        "Training",
+        "Grounding"
+      ],
+      "mode": "ar",
+      "preview": "models/test-pole-structure/preview.jpg",
+      "markers": 2,
+      "size": 19628,
+      "updated": "2026-11-23T15:26:37.871Z"
+    },
+    {
       "slug": "animated-demo-excavator",
       "title": "Animated demo excavator",
       "description": "Animated demo excavator. Tap the boom, stick, bucket or cab to move it.",
@@ -48,5 +62,5 @@
       "updated": "2026-11-20T17:20:53.212Z"
     }
   ],
-  "updated": "2026-11-20T17:21:27.003Z"
+  "updated": "2026-11-23T15:26:50.454Z"
 }

@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "title": "Test Pole Structure",
+  "mode": "ar",
+  "model": "model.glb",
+  "markers": [
+    {
+      "id": "mmwtf4jyklbd8",
+      "title": "Phase B conductor",
+      "message": "The center phase, carried on the insulator at the top of the pole.",
+      "position": [
+        0.0607,
+        12.3395,
+        0.0649
+      ],
+      "normal": [
+        0.9659,
+        0.2588,
+        0.0014
+      ]
+    },
+    {
+      "id": "mmwtf4k5mygr8",
+      "title": "Ground lead",
+      "message": "The copper lead that runs down the pole to the ground point.",
+      "position": [
+        0.0222,
+        6.0118,
+        0.2465
+      ],
+      "normal": [
+        0.309,
+        0.0048,
+        0.951
+      ]
+    }
+  ],
+  "arSize": 2
+}

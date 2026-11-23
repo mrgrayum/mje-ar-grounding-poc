@@ -35,12 +35,29 @@ Rules for this project:
 
 The Windows authoring app's **Publish to library** rewrites `viewer.js`, `ar.js`, `library.js` and the HTML pages with its own (older) copies. Once grounding code is added, publishing from the app into this folder would overwrite it. Until that is solved, publish models from the app only into a scratch folder and copy just `models/<name>/` and the `library.json` entry here.
 
+## The test structure (Stage 1)
+
+`tools/make-structure.mjs` generates a wood pole with a crossarm, three pin insulators, three conductors, a ground lead and a ground point. Re-run it (`node tools/make-structure.mjs`) after changing the numbers in `DESIGN` at the top of the file. Units are meters, Y is up, the power line runs along Z, the crossarm along X, the ground lead is on the +Z face of the pole. Phase B is carried on the pole top, A and C on the crossarm ends. Conductors (8 cm) and the ground lead (6 cm) are deliberately **exaggerated in thickness** so they can be tapped when the pole is shown about 2 m tall in AR. This is a training visual, not engineering data.
+
+Required part (node) names, which the grounding code will rely on: `Pole`, `Crossarm1`, `InsulatorA`, `InsulatorB`, `InsulatorC`, `PhaseA_Conductor`, `PhaseB_Conductor`, `PhaseC_Conductor`, `GroundLead`, `GroundPoint`. Every part must have real geometry (see below). The three phases are the same color on purpose: students must identify them.
+
+Tools: `node tools/check-nodes.mjs <file.glb>` lists the parts of any model; `node tools/optimize-check.mjs <file.glb>` runs the same steps as the app's "Optimize for phones" and compares every part before and after.
+
+### Stage 1 findings: what the optimizer does to named parts
+
+Tested on the generated structure, with optimization forced on (the app normally skips a file that would shrink by less than 3 percent; this one shrinks about 78 percent, so the real publish flow does optimize it).
+
+1. **Names survive.** All 10 named parts are present, with the same hierarchy, after optimization. Identical shapes (for example the three insulators) are shared internally, but each keeps its own named part.
+2. **Empty parts are deleted.** A part with no geometry (an empty marker node) is removed by the cleanup step. Every part that must survive needs real, visible geometry, which is why `GroundPoint` is a small copper block.
+3. **Each part's own coordinate system is rewritten.** The compression stores every part's vertices in a small normalized range and moves the scale and offset into the part's own transform. Example: `Pole` goes from scale 1 to scale 6 and origin height 0 to 6, `PhaseB_Conductor` from scale 1 to 4.007. **Where the part sits in space does not change** (all parts match within 0.2 mm), but a point stored as `{node, local: [x, y, z]}` has different numbers before and after optimization.
+4. **Consequence:** a record that stores `local` coordinates is only valid against the exact published `model.glb` it was made on. Re-publishing the model (re-optimizing) could shift stored positions. Options for the record format and the optimizer are written up with the Stage 2 plan.
+
 ## Progress log
 
 | Stage | Date | What changed | Verified by the project owner |
 |---|---|---|---|
 | 0. New repo and verified baseline | 2026-11-23 | Repository created from the live library `mje-ar` at commit `bedfd17`. Copy matches the original file for file (54 files, same hashes). Added the web source (`src/`), `build-web.mjs` (rebuilt bundles are byte-identical to the published ones), `serve.mjs`, this README. No behaviour changes. | 2026-11-23: all four checks passed (library and demo models, 3D page with markers and tour, iPhone AR placement, original site unchanged). |
-| 1. Test structure with named parts | | | |
+| 1. Test structure with named parts | 2026-11-23 | Added `tools/make-structure.mjs` (generates the structure), `tools/check-nodes.mjs` (lists the parts in any .glb), `tools/optimize-check.mjs` (tests what the optimizer does to named parts), the generated `tools/generated/test-pole.glb`, and the published model `models/test-pole-structure/` with two sample markers. New dev-only tools: glTF Transform and meshoptimizer (same versions as the MJE AR app). No change to the viewer, AR code or engine. See "Stage 1 findings" below. | Pending |
 | 2. Ground mode in the 3D viewer | | | |
 | 3. Session record: save, export, reload | | | |
 | 4. Ground mode in AR (iPhone) | | | |
