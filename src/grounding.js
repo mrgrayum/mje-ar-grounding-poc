@@ -71,14 +71,13 @@ const makeClampBuilder = () => {
   return {build, setPending, dispose: () => { [yellow, glow, black, gBody, gBolt, gEye].forEach(x => x.dispose()) }}
 }
 
-// ---- the pole-mounted U bracket and the ground rod, built from simple shapes --------------------------------
-// U bracket frame (the "bracket"): +Z points straight out from the pole, +Y is up, +X runs across. Unit size 1 =
-// FITTING_SIZE x the model's radius. It is drawn after the pole-mounted grounding clamp in the photos: a gray aluminum
-// U that lies LEVEL and sticks straight out from the pole (two arms and a cross bar at the far end), held on the pole by a
-// zinc chain that closes the open end of the U round the back of the pole, with a bronze pin on the left arm and a screw
-// tensioner hanging from the right arm. The ground cables are fastened directly to the U: six bronze collars with a bolt
-// hanging below them, two on the cross bar and two on each arm. Ground rod frame: +Y is up and the origin is where the rod
-// goes into the ground; the cable is fastened to the eye on top.
+// ---- the pole-mounted cluster bracket and the ground rod, built from simple shapes ------------------------
+// Bracket frame: +Z points straight out from the pole, +Y is up, +X runs across. Unit size 1 = FITTING_SIZE x the model's
+// radius. It is drawn after the chain-type pole clamp in the photos: a zinc CHAIN that wraps round the pole, a gray jaw on
+// the front of the pole where the chain ends meet, a screw tensioner with a bronze knob, and a square gray U that lies
+// level and sticks straight out from the jaw (two arms and a cross bar at the far end). The ground clamps go straight on
+// the U, exactly as they go on a wire: there are no studs or terminals. Ground rod frame: +Y is up and the origin is
+// where the rod goes into the ground; the cable is fastened to the eye on top.
 const makeFittingBuilder = () => {
   const alum = new THREE.MeshStandardMaterial({color: 0xb4b9bd, roughness: 0.55, metalness: 0.55})
   const zinc = new THREE.MeshStandardMaterial({color: 0xaeb6bd, roughness: 0.45, metalness: 0.8}) // the chain and the screw
@@ -86,38 +85,36 @@ const makeFittingBuilder = () => {
   const copper = new THREE.MeshStandardMaterial({color: 0xb87333, roughness: 0.4, metalness: 0.7})
   const dark = new THREE.MeshStandardMaterial({color: 0x222222, roughness: 0.6, metalness: 0.3})
   const glow = new THREE.MeshStandardMaterial({color: GROUND_CONFIG.CLAMP_COLOR, roughness: 0.45, metalness: 0.1, emissive: 0xFFEF00, emissiveIntensity: 0.6}) // waiting for its cable
-  const gArm = new THREE.BoxGeometry(0.22, 0.42, 1) // a side of the U (stretched to its length)
-  const gCross = new THREE.BoxGeometry(1, 0.42, 0.22) // the cross bar of the U (stretched to its width)
-  const gCollar = new THREE.BoxGeometry(0.38, 0.56, 0.38) // a bronze collar round the bar
-  const gBolt = new THREE.CylinderGeometry(0.06, 0.06, 0.6, 8) // hangs below the collar; the cable is fastened to its end
-  const gHead = new THREE.CylinderGeometry(0.15, 0.15, 0.14, 6)
-  const gPin = new THREE.CylinderGeometry(0.11, 0.11, 0.9, 10).rotateZ(Math.PI / 2)
-  const gPinEnd = new THREE.SphereGeometry(0.19, 10, 8)
-  const gBody = new THREE.CylinderGeometry(0.2, 0.2, 0.9, 10) // the screw tensioner's body
-  const gScrew = new THREE.CylinderGeometry(0.07, 0.07, 0.9, 8)
-  const gFoot = new THREE.CylinderGeometry(0.34, 0.34, 0.12, 12)
+  const gArm = new THREE.BoxGeometry(0.32, 0.36, 1) // a side of the U (stretched to its length)
+  const gCross = new THREE.BoxGeometry(1, 0.36, 0.32) // the cross bar of the U (stretched to its width)
+  const gJaw = new THREE.BoxGeometry(1, 0.55, 0.42) // the jaw the chain ends meet at (stretched to its width)
+  const gBody = new THREE.CylinderGeometry(0.17, 0.17, 0.9, 10).rotateZ(Math.PI / 2) // the screw tensioner's body
+  const gScrew = new THREE.CylinderGeometry(0.06, 0.06, 0.7, 8).rotateZ(Math.PI / 2)
+  const gKnob = new THREE.SphereGeometry(0.28, 12, 8)
   const gLink = new THREE.TorusGeometry(0.1, 0.04, 6, 12).scale(1.5, 1, 1) // one chain link, long side along x
   const gRod = new THREE.CylinderGeometry(0.15, 0.15, 4.2, 12) // from 1.2 below the ground to 3 above it
   const gCap = new THREE.SphereGeometry(0.3, 12, 8)
   const gEye = new THREE.TorusGeometry(0.28, 0.07, 8, 16)
   const gPad = new THREE.CylinderGeometry(1.2, 1.2, 0.04, 24)
-  const mesh = (geo, mat) => { const m = new THREE.Mesh(geo, mat); m.userData.noPick = true; return m }
+  // uPart: this piece is part of the U, the place a ground clamp can go. fitPart: this piece belongs to the hardware.
+  const mesh = (geo, mat, uPart = false) => { const m = new THREE.Mesh(geo, mat); m.userData.noPick = true; m.userData.fitPart = true; m.userData.uPart = uPart; return m }
 
+  // poleR = radius of the pole at this spot in the bracket's units, so the chain goes round it exactly.
   const buildBracket = (poleR = 1.4) => {
     const g = new THREE.Group()
-    // the U: its two arms start on the pole's surface either side of the tapped spot and run straight out
-    const hw = Math.min(Math.max(poleR * 0.75, 0.9), poleR * 0.9) // half the width of the U
-    const z0 = -(poleR - Math.sqrt(poleR * poleR - hw * hw)) // where the arms meet the pole
-    const zf = 2.8 // the cross bar at the far end
-    const arms = [-hw, hw].map((x) => { const a = mesh(gArm, alum); a.scale.z = zf - z0; a.position.set(x, 0, (zf + z0) / 2); g.add(a); return a })
-    const cross = mesh(gCross, alum); cross.scale.x = 2 * hw + 0.22; cross.position.set(0, 0, zf); g.add(cross)
-    // the pin on the left arm and the screw tensioner hanging from the right arm, at the pole end
-    const pin = mesh(gPin, bronze); pin.position.set(-hw - 0.5, 0.3, z0 + 0.05); g.add(pin)
-    const pinEnd = mesh(gPinEnd, bronze); pinEnd.position.set(-hw - 1.0, 0.3, z0 + 0.05); g.add(pinEnd)
-    const body = mesh(gBody, alum); body.position.set(hw, -0.65, z0 + 0.05); g.add(body)
-    const screw = mesh(gScrew, zinc); screw.position.set(hw, -1.55, z0 + 0.05); g.add(screw)
-    const foot = mesh(gFoot, alum); foot.position.set(hw, -2.05, z0 + 0.05); g.add(foot)
-    // the chain closes the open end of the U: an arc of interlocking links round the back of the pole
+    const hw = Math.min(0.75, poleR * 0.9) // half the width of the jaw
+    const z0 = -(poleR - Math.sqrt(poleR * poleR - hw * hw)) // where the jaw's ends meet the pole's surface
+    const zf = 2.4 // the cross bar at the far end of the U
+    const zb = z0 + 0.2 // where the arms leave the jaw
+    const ux = hw - 0.1 // the arms stand a little inside the jaw's ends
+    const arms = [-ux, ux].map((x) => { const a = mesh(gArm, alum, true); a.scale.z = zf - zb; a.position.set(x, 0, (zf + zb) / 2); g.add(a); return a })
+    const cross = mesh(gCross, alum, true); cross.scale.x = 2 * ux + 0.32; cross.position.set(0, 0, zf); g.add(cross)
+    const jaw = mesh(gJaw, alum); jaw.scale.x = 2 * hw; jaw.position.set(0, 0, z0 + 0.1); g.add(jaw)
+    // the screw tensioner sticks out sideways from the left end of the jaw, ending in a bronze knob
+    const body = mesh(gBody, alum); body.position.set(-hw - 0.45, 0, z0 + 0.1); g.add(body)
+    const screw = mesh(gScrew, zinc); screw.position.set(-hw - 1.15, 0, z0 + 0.1); g.add(screw)
+    const knob = mesh(gKnob, bronze); knob.position.set(-hw - 1.6, 0, z0 + 0.1); g.add(knob)
+    // the chain: an arc of interlocking links from one end of the jaw, round the back of the pole, to the other
     const rho = poleR + 0.12
     const cz = -poleR
     const phiA = Math.atan2(z0 - cz, -hw)
@@ -127,6 +124,7 @@ const makeFittingBuilder = () => {
     const n = Math.max(8, Math.round(arcLen / 0.27))
     const chain = new THREE.InstancedMesh(gLink, zinc, n)
     chain.userData.noPick = true
+    chain.userData.fitPart = true
     chain.frustumCulled = false
     const up = new THREE.Vector3(0, 1, 0)
     const m4 = new THREE.Matrix4()
@@ -142,17 +140,11 @@ const makeFittingBuilder = () => {
       chain.setMatrixAt(k, m4)
     }
     g.add(chain)
-    // six attachment points straight on the U: two on the cross bar, two on each arm
-    const spots = [[-0.5 * hw, zf], [0.5 * hw, zf], [-hw, 1.0], [hw, 1.0], [-hw, 1.9], [hw, 1.9]]
-    const lugs = []
-    spots.forEach(([x, z]) => {
-      const collar = mesh(gCollar, bronze); collar.position.set(x, -0.1, z); g.add(collar)
-      const bolt = mesh(gBolt, dark); bolt.position.set(x, -0.6, z); g.add(bolt)
-      const head = mesh(gHead, dark); head.position.set(x, -0.95, z); g.add(head)
-      const lug = new THREE.Object3D(); lug.position.set(x, -1.05, z); g.add(lug) // where a cable is fastened
-      lugs.push(lug)
-    })
-    g.userData = {noPick: true, main: cross, glowMeshes: [...arms, cross], baseMat: alum, lugs, radius: 3.2, axis: [0, 0, 1], chain}
+    // points along the U (bracket coordinates), used to snap a finger that lands near the bracket to the nearest place on it
+    const samples = []
+    for (let z = zb + 0.3; z <= zf + 0.001; z += 0.3) { samples.push(new THREE.Vector3(-ux, 0, z)); samples.push(new THREE.Vector3(ux, 0, z)) }
+    for (let x = -ux; x <= ux + 0.001; x += 0.3) samples.push(new THREE.Vector3(x, 0, zf))
+    g.userData = {noPick: true, glowMeshes: [...arms, cross], baseMat: alum, lugs: [], radius: 3.0, axis: [0, 0, 1], chain, bracketU: {underY: -0.18, samples}}
     return g
   }
   const buildRod = () => {
@@ -167,9 +159,9 @@ const makeFittingBuilder = () => {
   }
   const setPending = (f, on) => {
     const u = f.group.userData
-    ;(u.glowMeshes || [u.main]).forEach((m) => { m.material = on ? glow : u.baseMat })
+    ;(u.glowMeshes || (u.main ? [u.main] : [])).forEach((m) => { m.material = on ? glow : u.baseMat })
   }
-  return {buildBracket, buildRod, setPending, glow, disposeOne: (g) => { if (g.userData.chain) g.userData.chain.dispose() }, dispose: () => { [alum, zinc, bronze, copper, dark, glow, gArm, gCross, gCollar, gBolt, gHead, gPin, gPinEnd, gBody, gScrew, gFoot, gLink, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
+  return {buildBracket, buildRod, setPending, glow, disposeOne: (g) => { if (g.userData.chain) g.userData.chain.dispose() }, dispose: () => { [alum, zinc, bronze, copper, dark, glow, gArm, gCross, gJaw, gBody, gScrew, gKnob, gLink, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
 }
 
 // ---- main factory ---------------------------------------------------------------------------------
@@ -185,10 +177,11 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   const storageKey = `mje-grounding:${modelInfo.slug}`
 
   // An END of a ground is either a clamp on a part, {kind:'clamp', part, clamp}, or a piece of hardware,
-  // {kind:'fitting', fitting, slot} (slot = which stud of a bracket the cable is fastened to).
+  // {kind:'fitting', fitting, slot} (a ground rod's eye; a bracket is not an end: clamps sit on its U like on a wire).
   const grounds = [] // what is drawn now: {id, a, b, placedAt, cable, cableKey}
   const fittings = [] // cluster brackets and ground rods: {id, type, label, node, group, lugs, lugCount, used: Set, placedAt}
   let pending = null // the first end of a pair that is waiting for its second tap
+  const history = [] // grounds and hardware in the order they were made, so Undo takes back the last thing made
   let tapNote = '' // a short hint after a tap that could not be used (for example on the crossarm)
   let enabled = false
   let time = 0
@@ -219,7 +212,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     if (/static|shield/i.test(part)) return 'Static'
     return prettify(part)
   }
-  const defaultLabel = part => cfg.PART_LABELS[part] || (isConductor(part) ? suggestFor(part) : prettify(part))
+  const defaultLabel = part => cfg.PART_LABELS[part] || (fittings.find(f => f.id === part) || {}).label || (isConductor(part) ? suggestFor(part) : prettify(part))
   const labelFor = part => labels[part] || defaultLabel(part)
   const endLabel = end => (end.kind === 'fitting' ? end.fitting.label : (end.label !== undefined ? end.label : labelFor(end.part)))
   const needsName = part => isConductor(part) && !labels[part]
@@ -432,6 +425,12 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   const clampPose = (node, pointWorld, normalWorld) => {
     const n = normalWorld.clone().normalize()
     const down = new THREE.Vector3(0, -1, 0)
+    if (node.userData && node.userData.bracketU) {
+      // on the bracket's U a clamp hangs down from the underside, right under the tapped spot, just like on a wire
+      node.updateWorldMatrix(true, false)
+      const under = node.localToWorld(new THREE.Vector3(0, node.userData.bracketU.underY, 0))
+      return {point: new THREE.Vector3(pointWorld.x, under.y, pointWorld.z), dir: down}
+    }
     if (node.isMesh && isConductor(node.name)) {
       if (!node.geometry.boundingBox) node.geometry.computeBoundingBox()
       const size = node.geometry.boundingBox.getSize(tmp.a)
@@ -666,7 +665,9 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   // ---- hardware: cluster brackets and ground rods -------------------------------------------------------
   const labelOfId = id => `${id[0] === 'R' ? 'Rod' : 'Bracket'} ${id.slice(1)}`
   const nextFittingId = prefix => `${prefix}${fittings.reduce((m, f) => (f.id[0] === prefix ? Math.max(m, Number(f.id.slice(1)) || 0) : m), 0) + 1}`
-  const usesOf = f => grounds.filter(g => g.a.fitting === f || g.b.fitting === f).length
+  // An end of a ground is "on" a piece of hardware when it is the hardware itself (a rod) or a clamp sitting on it (a bracket's U).
+  const endOn = (e, f) => (e.kind === 'fitting' ? e.fitting === f : hasAncestor(e.clamp, f.group))
+  const usesOf = f => grounds.filter(g => endOn(g.a, f) || endOn(g.b, f)).length
   const allocLug = (f, want) => {
     if (f.type === 'ground_rod') return 0
     if (Number.isInteger(want) && want >= 0 && want < f.lugCount && !f.used.has(want)) { f.used.add(want); return want }
@@ -674,11 +675,12 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     return 0 // more cables than studs (only possible from a damaged record): share the first stud
   }
   const freeLug = (f, slot) => { if (f.type !== 'ground_rod') f.used.delete(slot) }
-  const isFull = f => f.type !== 'ground_rod' && f.used.size >= f.lugCount
 
   const registerFitting = (type, id, group, node, placedAt, label) => {
     const f = {id, type, label: label || labelOfId(id), node, group, lugs: group.userData.lugs, lugCount: group.userData.lugs.length, used: new Set(), placedAt: placedAt || new Date().toISOString()}
+    group.name = id // clamps placed on a bracket are recorded as sitting on the part with this name
     fittings.push(f)
+    history.push(f)
     return f
   }
 
@@ -696,8 +698,8 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     return best ? Math.min(Math.max(best.d / (cfg.FITTING_SIZE * stage.radius), 0.6), 8) : 1.4
   }
 
-  // A cluster bracket on a part (the pole) at a world point, plate flat against the surface, studs pointing straight out
-  // from the pole and level, upright. normalWorld is only used for its sideways direction.
+  // A cluster bracket on a part (the pole) at a world point: the chain goes round the pole and the U sticks straight out
+  // from the pole, level. normalWorld is only used for its sideways direction.
   const makeBracket = (node, pointWorld, normalWorld, {id, placedAt, label} = {}) => {
     const up = new THREE.Vector3(0, 1, 0)
     const n = normalWorld.clone()
@@ -734,8 +736,9 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     const normal = new THREE.Vector3(...f.group.userData.axis).transformDirection(f.group.matrixWorld).transformDirection(inv)
     return {id: f.id, type: f.type, label: f.label, node: f.node, local: round4(f.group.position.toArray()), model: round4(model.toArray()), normal: round3(normal.toArray()), placedAt: f.placedAt}
   }
-  // Hardware that has a cable on it. (A piece that was just placed and is still waiting for its cable is not recorded.)
-  const fittingsSnapshot = () => fittings.filter(f => usesOf(f) > 0).map(fittingData)
+  // Every bracket (clamps on it are recorded as sitting on it), and every rod that has a cable. (A rod just placed and still
+  // waiting for its cable is not recorded.)
+  const fittingsSnapshot = () => fittings.filter(f => f.type === 'cluster_bracket' || usesOf(f) > 0).map(fittingData)
 
   // Rebuilds a piece of hardware from saved data. Returns null if the part it sat on is missing from this model.
   const addFittingFromData = (d, {fixedLabel = false} = {}) => {
@@ -756,8 +759,8 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     const i = fittings.indexOf(f)
     if (i < 0) return
     fittings.splice(i, 1) // first, so the cables below do not try to remove it again
-    grounds.filter(g => g.a.fitting === f || g.b.fitting === f).forEach(g => removeGround(g))
-    if (pending && pending.kind === 'fitting' && pending.fitting === f) pending = null
+    grounds.filter(g => endOn(g.a, f) || endOn(g.b, f)).forEach(g => removeGround(g))
+    if (pending && (pending.kind === 'fitting' ? pending.fitting === f : hasAncestor(pending.clamp, f.group))) pending = null
     if (f.group.parent) f.group.parent.remove(f.group)
     fittingKit.disposeOne(f.group)
   }
@@ -777,6 +780,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     stage.modelGroup.updateWorldMatrix(true, true)
     rebuildCable(g)
     grounds.push(g)
+    history.push(g)
     return g
   }
 
@@ -799,6 +803,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   }
   const removeAll = () => {
     dropPending(); clearRequest(); tapNote = ''
+    history.length = 0
     while (grounds.length) removeGround(grounds[0])
     while (fittings.length) removeFitting(fittings[0])
   }
@@ -847,17 +852,17 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   const placeEnd = end => (pending ? finishGround(end) : startGround(end))
   const note = (str) => { tapNote = str; emit() }
 
-  // A hardware piece under the tap. A ray must hit it exactly; a finger also counts when it lands right beside it
+  // A piece of hardware under the tap: {f, hit}. A ray must hit it exactly; a finger also counts when it lands right beside it
   // (but a wire close to the finger wins, and next to the pole ground the finger must be well on the bracket).
   const fittingAt = (clientX, clientY, pointerType, mHit) => {
     if (!fittings.length) return null
     const rect = stage.renderer.domElement.getBoundingClientRect()
     const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1)
     raycaster.setFromCamera(ndc, stage.camera)
-    const hits = raycaster.intersectObjects(fittings.map(f => f.group), true)
+    const hits = raycaster.intersectObjects(fittings.map(f => f.group), true).filter(h => h.object.userData.fitPart) // not the clamps on it
     if (hits.length) {
       const f = fittings.find(x => hasAncestor(hits[0].object, x.group))
-      if (f && (!mHit || hits[0].distance <= mHit.distance + 1e-4)) return f
+      if (f && (!mHit || hits[0].distance <= mHit.distance + 1e-4)) return {f, hit: hits[0]}
     }
     if (pointerType === 'mouse') return null
     const kind = mHit ? tapKind(partName(mHit.object)) : 'none'
@@ -876,9 +881,31 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
       const rPx = (rWorld * (rect.height / 2) * stage.camera.projectionMatrix.elements[5]) / Math.max(d, 1e-6)
       const dist = Math.hypot(sx - clientX, sy - clientY)
       const reach = kind === 'lead' ? rPx * 0.8 : rPx + 20 // right beside the pole ground, only a finger really on the bracket counts
-      if (dist <= reach && (!best || dist < best.dist)) best = {f, dist}
+      if (dist <= reach && (!best || dist < best.dist)) best = {f, hit: null, dist}
     })
-    return best ? best.f : null
+    return best
+  }
+
+  // The place on a bracket's U nearest to a fingertip (world position).
+  const nearestUPoint = (f, clientX, clientY) => {
+    const rect = stage.renderer.domElement.getBoundingClientRect()
+    f.group.updateWorldMatrix(true, false)
+    let best = null
+    f.group.userData.bracketU.samples.forEach((smp) => {
+      const w = f.group.localToWorld(smp.clone())
+      const v = w.clone().project(stage.camera)
+      const d = Math.hypot((v.x * 0.5 + 0.5) * rect.width + rect.left - clientX, (-v.y * 0.5 + 0.5) * rect.height + rect.top - clientY)
+      if (!best || d < best.d) best = {d, w}
+    })
+    return best.w
+  }
+
+  // A ground clamp on a bracket's U at a world point.
+  const placeClampOnBracket = (f, pointWorld) => {
+    const node = f.group
+    node.updateWorldMatrix(true, false)
+    const pose = clampPose(node, pointWorld, new THREE.Vector3(0, 1, 0))
+    return buildClampOn(node, node.worldToLocal(pose.point.clone()), dirToLocal(node, pose.dir))
   }
 
   // The point on the ground (the floor level of the model) under a tap, in model coordinates, or null.
@@ -908,26 +935,34 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     if (needsName(p.part)) askName(p.part) // ask once per conductor
     placeEnd(p)
   }
-  const tapFitting = (f) => {
-    if (pending && pending.kind === 'fitting' && pending.fitting === f) return note(`Tap a different point to connect ${f.label} to.`)
-    if (isFull(f)) return note(`${f.label} has all ${f.lugCount} studs in use.`)
-    placeEnd({kind: 'fitting', fitting: f})
-  }
-  const tapPole = (hit) => {
-    if (pending && pending.kind === 'fitting' && pending.fitting.type === 'cluster_bracket') {
-      return note(`${pending.fitting.label} is placed. Tap a wire, the pole ground, or the ground beside the pole (for a rod) to connect it.`)
+  const tapFitting = ({f, hit}, clientX, clientY) => {
+    if (f.type === 'ground_rod') {
+      if (pending && pending.kind === 'fitting' && pending.fitting === f) return note(`Tap a different point to connect ${f.label} to.`)
+      return placeEnd({kind: 'fitting', fitting: f})
     }
+    // a bracket: a clamp goes on its U, the same as on a wire
+    let point
+    if (hit && hit.object.userData.uPart) point = hit.point.clone()
+    else if (hit) return note('Tap the square U on the bracket to attach a ground clamp.')
+    else point = nearestUPoint(f, clientX, clientY)
+    placeEnd(placeClampOnBracket(f, point))
+  }
+  // The pole: add a cluster bracket. It is only a place for clamps, so nothing is connected yet.
+  const tapPole = (hit) => {
     const node = hit.object
     node.updateWorldMatrix(true, false)
     const nWorld = (hit.face ? hit.face.normal.clone() : new THREE.Vector3(0, 0, 1)).transformDirection(node.matrixWorld)
-    placeEnd({kind: 'fitting', fitting: makeBracket(node, hit.point.clone(), nWorld)})
+    const f = makeBracket(node, hit.point.clone(), nWorld)
+    if (!sessionStart) sessionStart = new Date().toISOString()
+    save()
+    note(`${f.label} placed. Tap its square U to attach a ground clamp, the same as on a wire.`)
   }
   const tapGround = (clientX, clientY) => {
     if (!hasPole()) return
     const pt = floorPoint(clientX, clientY)
     if (!pt || !nearPole(pt)) return note('Tap a wire, the pole ground, the pole (cluster bracket) or the ground right beside the pole (ground rod).')
     if (pending && pending.kind === 'fitting' && pending.fitting.type === 'ground_rod') {
-      return note(`${pending.fitting.label} is placed. Tap the pole ground, a wire, or the pole (for a bracket) to connect it.`)
+      return note(`${pending.fitting.label} is placed. Tap the pole ground, a wire or the U bracket to connect it.`)
     }
     placeEnd({kind: 'fitting', fitting: makeRod(pt)})
   }
@@ -937,8 +972,8 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     stage.modelGroup.updateWorldMatrix(true, true)
     const mHit = hitPart(clientX, clientY, pointerType)
     if (nameMode) { if (mHit) nameTap(mHit); return }
-    const f = fittingAt(clientX, clientY, pointerType, mHit)
-    if (f) return tapFitting(f)
+    const found = fittingAt(clientX, clientY, pointerType, mHit)
+    if (found) return tapFitting(found, clientX, clientY)
     if (!mHit) return tapGround(clientX, clientY)
     const kind = tapKind(partName(mHit.object))
     if (kind === 'blocked') return note('Clamps go on a wire, the pole ground or the pole. The crossarm and insulators are not used for grounding.')
@@ -968,7 +1003,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   const endFromData = (e, opts) => {
     if (e.kind === 'fitting') {
       const f = fittings.find(x => x.id === e.fitting)
-      return f ? {kind: 'fitting', fitting: f, slot: Number.isInteger(e.slot) ? e.slot : undefined} : null
+      return f && f.type === 'ground_rod' ? {kind: 'fitting', fitting: f, slot: Number.isInteger(e.slot) ? e.slot : undefined} : null // (a bracket is no longer a cable end: clamps go on its U)
     }
     return placeClampFromData(e, opts)
   }
@@ -1118,8 +1153,13 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
       clearRequest()
       tapNote = ''
       if (pending) dropPending()
-      else if (grounds.length) removeGround(grounds[grounds.length - 1]) // takes its bracket or rod with it if nothing else uses it
-      else if (fittings.length) removeFitting(fittings[fittings.length - 1])
+      else {
+        let last = null
+        while (history.length && !last) { const c = history.pop(); if (grounds.includes(c) || fittings.includes(c)) last = c }
+        if (!last) last = grounds[grounds.length - 1] || fittings[fittings.length - 1]
+        if (grounds.includes(last)) removeGround(last) // takes its rod with it if nothing else uses it
+        else if (last) removeFitting(last)
+      }
       if (!grounds.length && !pending && !fittings.length) sessionStart = null
       save(); emit()
     },
@@ -1476,12 +1516,12 @@ export function createGroundUI(root, grounding, {
     } else if (pending && pending.kind === 'fitting') {
       text(msg, 'b', '', pending.label)
       msg.append(pending.type === 'ground_rod'
-        ? ' placed. Tap the pole ground or a wire, or tap the pole to add a bracket.'
+        ? ' placed. Tap the pole ground, a wire or the square U of a bracket.'
         : ' placed. Tap a wire or the pole ground, or the ground beside the pole for a rod.')
     } else if (pending) {
       msg.append('Clamp 1 on ')
       text(msg, 'b', '', pending.label)
-      msg.append(hw ? '. Tap the second point: another wire, the pole ground, the pole (bracket) or the ground beside it (rod).' : '. Tap the second point.')
+      msg.append(hw ? '. Tap the second point: another wire, the pole ground, the square U of a bracket, or the ground beside the pole (rod).' : '. Tap the second point.')
     } else if (items.length) {
       msg.textContent = hw ? 'Ground placed. Tap a wire, the pole or the ground beside it to start the next one.' : 'Ground placed. Tap a part to start the next one.'
     } else {
