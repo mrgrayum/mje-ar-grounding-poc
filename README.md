@@ -61,7 +61,26 @@ Available only on models whose `markers.json` has `"grounding": true` (add `?gro
 - **Clamps belong to the part.** Each clamp is a child of the tapped part's node, at the tapped point on its surface, so it moves with that part. Its size is corrected for the part's own scale (see Stage 1 findings).
 - **Cable sag.** A parabola with a droop of 10 percent of the span (`SAG_RATIO` in `src/grounding.js`). A mostly level cable droops down; a mostly vertical one (phase to ground lead) bows outward, away from the surfaces it is clamped to, because "down" would only lay it along the pole.
 - **Settings** (sag, sizes, colors, tap limits) are in `GROUND_CONFIG` at the top of `src/grounding.js`. Sizes are fractions of the model's radius, so they scale with any model.
-- **In-memory record** (`grounding.snapshot()`), one entry per completed ground: `{id, a: {node, local, model}, b: {node, local, model}, placedAt}`. `node` is the tapped part's name, `local` the point in that part's own coordinates, `model` the same point in the model's overall coordinates (a backup, because `local` changes if a model is re-optimized). Export and reload come in Stage 3.
+## Session record (Stage 3): export, load, refresh protection
+
+Format and code: `src/grounding-record.js`. Session panel fields: **Student name** (required to export) and **Class** (optional).
+
+```json
+{ "format": "mje-grounding-record", "version": 1,
+  "model": { "slug": "test-pole-structure", "title": "Test Pole Structure", "bytes": 19628, "fingerprint": "c3dc2e6173879dbe" },
+  "student": "...", "scenario": "...",
+  "sessionStart": "time of the first clamp", "sessionEnd": "time of the export",
+  "grounds": [ { "id": "G1",
+                 "a": { "node": "PhaseB_Conductor", "local": [x,y,z], "model": [x,y,z], "normal": [x,y,z] },
+                 "b": { "node": "GroundLead",       "local": [x,y,z], "model": [x,y,z], "normal": [x,y,z] },
+                 "placedAt": "time" } ] }
+```
+
+- `node` is the name of the part tapped; `local` is the point in that part's own coordinates; `model` is the same point in the model's overall coordinates; `normal` is which way the surface faced (model coordinates).
+- **Why `model` and `normal` are in the file.** Stage 1 showed `local` changes whenever a model is re-optimized. Reloading therefore draws from `model` (stable), attached to the part of that name, and uses `normal` to turn the clamp the right way. `local` stays in the file for the record and for auditing.
+- `model.bytes` and `model.fingerprint` (first 16 characters of the model file's SHA-256) identify the exact file. If they differ on loading, the record still loads, with a note that the model was updated. A record for a different model (`slug`) is refused. A record that names a part missing from the model draws the other grounds and says how many it skipped.
+- **Export record** downloads `grounding-record_<student>_<yyyymmdd-hhmm>.json`. **Load record** shows a saved file on the model read-only (add, undo, clear, delete and export are off); **Close record** returns to the live session, which is set aside untouched.
+- **Refresh protection.** After every change the placed grounds, student name and class are saved in the browser's local storage, one slot per model (`mje-grounding:<slug>`). On page load a saved session is redrawn with a note and **Start fresh** clears everything, including the saved copy. It never clears by itself. It lives only in that browser on that device (not shared, not backed up; lost by private windows or clearing site data). A first clamp that is still waiting for its partner is not saved. While a record is being viewed, nothing is saved.
 
 ## Progress log
 
@@ -70,6 +89,6 @@ Available only on models whose `markers.json` has `"grounding": true` (add `?gro
 | 0. New repo and verified baseline | 2026-11-23 | Repository created from the live library `mje-ar` at commit `bedfd17`. Copy matches the original file for file (54 files, same hashes). Added the web source (`src/`), `build-web.mjs` (rebuilt bundles are byte-identical to the published ones), `serve.mjs`, this README. No behaviour changes. | 2026-11-23: all four checks passed (library and demo models, 3D page with markers and tour, iPhone AR placement, original site unchanged). |
 | 1. Test structure with named parts | 2026-11-23 | Added `tools/make-structure.mjs` (generates the structure), `tools/check-nodes.mjs` (lists the parts in any .glb), `tools/optimize-check.mjs` (tests what the optimizer does to named parts), the generated `tools/generated/test-pole.glb`, and the published model `models/test-pole-structure/` with two sample markers. New dev-only tools: glTF Transform and meshoptimizer (same versions as the MJE AR app). No change to the viewer, AR code or engine. See "Stage 1 findings" below. | 2026-11-23: all four checks passed (structure in library with distinct parts, markers on the correct parts, part listing complete, iPhone AR placement). |
 | 2. Ground mode in the 3D viewer | 2026-11-23 | New `src/grounding.js` (shared by the 3D viewer now and the AR page in Stage 4; needs only the camera, the model and a per-frame tick). `src/viewer-main.js` switches it on for models with `"grounding": true` in `markers.json`; `src/core.js` gets a two-line switch (`pickingEnabled`) so marker taps are off in Ground mode. `models/test-pole-structure/markers.json` flagged. See "Ground mode" below. No change to the AR page logic, engine files or other models. | 2026-11-23: all five desktop checks passed (Phase B to ground lead, three grounds with correct names, no accidental clamps, undo/clear/delete, empty-space taps). |
-| 3. Session record: save, export, reload | | | |
+| 3. Session record: save, export, reload | 2026-11-23 | New `src/grounding-record.js` (format, checks, file name, fingerprint, download). `src/grounding.js` gets a session (student, class), saving on the device, restore after refresh, Start fresh, Export record, Load record (read-only) and Close record. `src/viewer-main.js` passes the model's size and fingerprint. Format additions agreed in the plan: model identification and `normal`; reload draws from `model` coordinates. No change to AR logic, engine files, other models or dependencies. | Pending |
 | 4. Ground mode in AR (iPhone) | | | |
 | 5. Minimal recipe builder | | | |

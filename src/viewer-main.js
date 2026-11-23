@@ -4,6 +4,7 @@ import {createTourUI} from './tour-ui.js'
 import {createSplash} from './splash.js'
 import {libContext, addLibraryChrome} from './libchrome.js'
 import {createGrounding, createGroundUI} from './grounding.js'
+import {fingerprintOf} from './grounding-record.js'
 
 const b64ToBuffer = (b64) => {
   const bin = atob(b64)
@@ -81,7 +82,10 @@ async function main() {
     // Ground mode (temporary protective grounding): only for models flagged "grounding": true in markers.json
     // (or with ?ground=1 added to the address for testing), and not in embedded frames.
     if ((data.grounding === true || new URLSearchParams(location.search).get('ground') === '1') && !(lib && lib.embed)) {
-      const grounding = createGrounding(stage)
+      // Which model file the grounds are placed on, so a saved record can tell whether it is opened on the same file.
+      const grounding = createGrounding(stage, {
+        model: {slug: lib ? lib.slug : 'model', title: data.title || '', bytes: buffer.byteLength, fingerprint: fingerprintOf(buffer)},
+      })
       grounding.attach(root)
       createGroundUI(root, grounding, {tour, shiftForLibraryBar: !!lib && data.mode === 'ar'})
       window.__ground = grounding // handy for debugging and tests
