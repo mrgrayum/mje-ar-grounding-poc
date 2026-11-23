@@ -90,6 +90,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   let nameMode = false // "Name conductors by tapping": taps name conductors instead of placing clamps
   let modeNote = '' // a short hint shown in name mode (for example when a tap was not on a conductor)
   let anchors = {} // part name -> where on the model its name tag sits (model coordinates)
+  let showTags = false // name tags on the wires are off unless switched on in Structure setup
 
   const emit = () => listeners.forEach(fn => fn())
 
@@ -173,7 +174,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
   }
   const syncTags = () => {
     while (tagSprites.length) { const t = tagSprites.pop(); tagGroup.remove(t); t.material.map.dispose(); t.material.dispose() }
-    tagGroup.visible = enabled && !viewing // tags are part of Ground mode, and are not drawn on a record that is being viewed
+    tagGroup.visible = enabled && !viewing && showTags // tags are optional, part of Ground mode, and not drawn on a record that is being viewed
     Object.entries(labels).forEach(([part, name]) => {
       const a = anchors[part]
       if (!a) return
@@ -307,10 +308,35 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     return {part: partName(node), clamp}
   }
 
+  // Where a clamp sits and which way it points. A clamp on a wire always HANGS DOWN from it, whichever side of the
+  // wire was tapped (top, side or underneath): the body goes on the underside of the wire right below the tapped spot
+  // and the cable eye points straight down, which is how a worker installs it and how the cable then hangs. Tapping
+  // the underside gives the same result, so the rule gives the same pose when a saved record is loaded again. On any
+  // other part the clamp keeps the direction of the surface but never points upward.
+  const clampPose = (node, pointWorld, normalWorld) => {
+    const n = normalWorld.clone().normalize()
+    const down = new THREE.Vector3(0, -1, 0)
+    if (node.isMesh && isConductor(node.name)) {
+      if (!node.geometry.boundingBox) node.geometry.computeBoundingBox()
+      const size = node.geometry.boundingBox.getSize(tmp.a)
+      const sc = node.getWorldScale(tmp.b)
+      const radius = Math.min(size.x * sc.x, size.y * sc.y, size.z * sc.z) / 2 // a wire is as thick as its thinnest side
+      const axis = pointWorld.clone().addScaledVector(n, -radius) // the middle of the wire under the tapped spot
+      return {point: axis.addScaledVector(down, radius), dir: down}
+    }
+    const d = n.clone()
+    if (d.y > 0) d.y = 0
+    if (d.lengthSq() < 1e-6) d.copy(down); else d.normalize()
+    return {point: pointWorld.clone(), dir: d}
+  }
+  const dirToLocal = (node, dirWorld) => dirWorld.clone().transformDirection(node.matrixWorld.clone().invert())
+
   const placeClamp = (hit) => {
     const node = hit.object
-    const normalLocal = hit.face ? hit.face.normal.clone() : new THREE.Vector3(0, 1, 0)
-    return buildClampOn(node, node.worldToLocal(hit.point.clone()), normalLocal)
+    node.updateWorldMatrix(true, false)
+    const nWorld = (hit.face ? hit.face.normal.clone() : new THREE.Vector3(0, 1, 0)).transformDirection(node.matrixWorld)
+    const pose = clampPose(node, hit.point, nWorld)
+    return buildClampOn(node, node.worldToLocal(pose.point.clone()), dirToLocal(node, pose.dir))
   }
 
   // Rebuilds a clamp from a saved end {node, model, normal}. Uses the model-space numbers, which do not change when
@@ -321,8 +347,8 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     stage.modelGroup.updateWorldMatrix(true, true)
     const world = stage.modelGroup.localToWorld(new THREE.Vector3(...e.model))
     const nWorld = new THREE.Vector3(...(e.normal || [0, 0, 1])).transformDirection(stage.modelGroup.matrixWorld)
-    const nLocal = nWorld.transformDirection(node.matrixWorld.clone().invert())
-    const end = buildClampOn(node, node.worldToLocal(world), nLocal)
+    const pose = clampPose(node, world, nWorld)
+    const end = buildClampOn(node, node.worldToLocal(pose.point.clone()), dirToLocal(node, pose.dir))
     if (fixedLabel) end.label = e.label || defaultLabel(e.node) // a record being viewed keeps its own names
     return end
   }
@@ -547,7 +573,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     try {
       const empty = !grounds.length && !student && !scenario && !structure.number && !structure.line && !structure.job && !Object.keys(labels).length
       if (empty) localStorage.removeItem(storageKey)
-      else localStorage.setItem(storageKey, JSON.stringify({student, scenario, structure, labels, anchors, sessionStart, savedAt: new Date().toISOString(), grounds: snapshot()}))
+      else localStorage.setItem(storageKey, JSON.stringify({student, scenario, structure, labels, anchors, showTags, sessionStart, savedAt: new Date().toISOString(), grounds: snapshot()}))
     } catch (e) { /* storage unavailable (private window, blocked): the session simply is not kept */ }
   }
 
@@ -657,6 +683,8 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     // A conductor that was just tapped and needs a name: {part, suggestion}, or null.
     get nameRequest() { return nameRequest ? {...nameRequest, choices: cfg.NAME_CHOICES} : null },
     get nameMode() { return nameMode },
+    get showTags() { return showTags },
+    setShowTags(on) { showTags = !!on; syncTags(); save(); emit() },
     get modeNote() { return modeNote },
     // Name mode: taps name conductors instead of placing clamps.
     setNameMode(on) {
@@ -686,6 +714,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
       const v = String(label || '').trim().slice(0, 40)
       if (v) labels[part] = v; else delete labels[part]
       if (nameRequest && nameRequest.part === part) clearRequest()
+      if (nameMode && v) modeNote = `Named "${v}". Tap another wire, or press Done.`
       syncTags()
       save(); emit()
     },
@@ -731,7 +760,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
       viewing = null
       removeAll()
       student = ''; scenario = ''; sessionStart = null
-      structure = {number: '', line: '', job: ''}; labels = {}; anchors = {}; nameMode = false; modeNote = ''
+      structure = {number: '', line: '', job: ''}; labels = {}; anchors = {}; showTags = false; nameMode = false; modeNote = ''
       syncTags()
       try { localStorage.removeItem(storageKey) } catch (e) { /* ignore */ }
       emit()
@@ -750,6 +779,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
         Object.entries(s.labels || {}).forEach(([k, v]) => { if (typeof v === 'string' && v.trim()) labels[k] = v.trim().slice(0, 40) })
         anchors = {}
         Object.entries(s.anchors || {}).forEach(([k, a]) => { if (Array.isArray(a) && a.length === 3 && a.every(Number.isFinite)) anchors[k] = a })
+        showTags = !!s.showTags
         syncTags()
         let count = 0
         s.grounds.forEach((d) => { try { if (addGroundFromData(d)) count++ } catch (e) { /* skip a damaged entry */ } })
@@ -870,6 +900,8 @@ const CSS = `
 .gd-modedone{flex:none;height:40px;padding:0 16px;border:0;border-radius:10px;background:#000;color:#FFEF00;font:700 14px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer;touch-action:manipulation}
 .gd-namemode{width:100%;height:44px;margin:8px 0 4px;border:0;border-radius:10px;background:#FFEF00;color:#000;font:700 14px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer;touch-action:manipulation}
 .gd-cstatus{font-size:12px;color:#bdbdbd}
+.gd-setup label.gd-check{display:flex;align-items:center;gap:10px;font-size:14px;color:#fff;margin:10px 0 4px}
+.gd-setup .gd-check input{width:22px;height:22px;flex:none;accent-color:#FFEF00}
 .gd-chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .gd-chip{height:40px;padding:0 14px;border:0;border-radius:999px;background:#2a2a2a;color:#fff;font:600 14px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer;touch-action:manipulation}
 .gd-chip:active{background:#444}
@@ -938,7 +970,8 @@ export function createGroundUI(root, grounding, {
     + '<label>Line or circuit name<input class="gd-st-line" type="text" maxlength="80" autocomplete="off"></label>'
     + '<label>Job / work order number<input class="gd-st-job" type="text" maxlength="60" autocomplete="off"></label>'
     + '<h4>Conductor names</h4><div class="gd-hint">Tap a wire on the model to name it. You can also name a wire the first time you ground to it.</div>'
-    + '<button type="button" class="gd-namemode">Name conductors by tapping</button><div class="gd-cstatus"></div><div class="gd-chips"></div><div class="gd-end"></div></details>'
+    + '<button type="button" class="gd-namemode">Name conductors by tapping</button><div class="gd-cstatus"></div><div class="gd-chips"></div>'
+    + '<label class="gd-check"><input type="checkbox" class="gd-showtags">Show conductor name tags on the model</label><div class="gd-end"></div></details>'
     + '<div class="gd-msg"></div><div class="gd-note" hidden></div><ul class="gd-list"></ul>'
     + '<div class="gd-btns"><button type="button" class="gd-undo">Undo last</button><button type="button" class="gd-clear">Clear all</button>'
     + '<button type="button" class="gd-morebtn" aria-expanded="false">More</button></div>'
@@ -964,6 +997,7 @@ export function createGroundUI(root, grounding, {
   const nameModeBtn = q('.gd-namemode')
   const cstatus = q('.gd-cstatus')
   const chips = q('.gd-chips')
+  const showTagsBox = q('.gd-showtags')
   const msg = q('.gd-msg')
   const note = q('.gd-note')
   const list = q('.gd-list')
@@ -1012,6 +1046,7 @@ export function createGroundUI(root, grounding, {
     if (document.activeElement !== stLine) stLine.value = st.line
     if (document.activeElement !== stJob) stJob.value = st.job
     const status = grounding.conductorStatus()
+    showTagsBox.checked = grounding.showTags
     cstatus.textContent = status.total ? `${status.named} of ${status.total} conductors named` : ''
     nameModeBtn.textContent = grounding.nameMode ? 'Done naming' : (status.named ? 'Name or rename conductors by tapping' : 'Name conductors by tapping')
     chips.textContent = ''
@@ -1127,6 +1162,7 @@ export function createGroundUI(root, grounding, {
     if (on) { setup.open = false; setMore(false); showNote('') } // clear the way so the model can be tapped
   }
   nameModeBtn.addEventListener('click', toggleNameMode)
+  showTagsBox.addEventListener('change', () => grounding.setShowTags(showTagsBox.checked))
   q('.gd-modedone').addEventListener('click', () => grounding.setNameMode(false))
 
   exportBtn.addEventListener('click', async () => {
