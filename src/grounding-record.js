@@ -73,6 +73,26 @@ export async function fingerprintOf(buffer) {
   }
 }
 
+// On a phone or tablet, hands the record to the system share sheet (Files, Mail, AirDrop...) as an attached file,
+// which is far more reliable than a browser download on iPhone. Falls back to a normal download when sharing a file
+// is not available (desktop, older browsers). Returns {how: 'shared' | 'downloaded' | 'cancelled', name}.
+export async function shareOrDownloadRecord(record) {
+  const name = recordFileName(record)
+  try {
+    const file = new File([JSON.stringify(record, null, 2)], name, {type: 'application/json'})
+    const touch = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+    if (touch && navigator.canShare && navigator.canShare({files: [file]})) {
+      await navigator.share({files: [file], title: 'Grounding record', text: `Grounding record: ${record.student}`})
+      return {how: 'shared', name}
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return {how: 'cancelled', name}
+    // any other problem: fall through to a normal download
+  }
+  downloadRecord(record)
+  return {how: 'downloaded', name}
+}
+
 // Offers the record to the user as a download (works from a normal click in desktop browsers).
 export function downloadRecord(record) {
   const blob = new Blob([JSON.stringify(record, null, 2)], {type: 'application/json'})

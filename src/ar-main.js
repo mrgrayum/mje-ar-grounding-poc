@@ -6,6 +6,8 @@ import {MarkerTour, ModelAnimator, injectStyles, parseGlb, glbInfo, needsDraco, 
 import {createTourUI} from './tour-ui.js'
 import {createSplash} from './splash.js'
 import {libContext, addLibraryChrome} from './libchrome.js'
+import {createGrounding, createGroundUI} from './grounding.js'
+import {fingerprintOf} from './grounding-record.js'
 
 // The engine's Three.js module reads THREE from the window.
 window.THREE = THREE
@@ -130,6 +132,8 @@ const onxrloaded = () => {
   let detachPicking = null
   let placed = false
   let ready = false
+  let grounding = null // temporary protective grounding (only for models flagged "grounding": true)
+  let groundUI = null
 
   const anchor = new THREE.Group() // position / yaw / scale chosen by the user
   const frame = new THREE.Group() // model-space origin (markers live in here)
@@ -159,7 +163,7 @@ const onxrloaded = () => {
     reticle.visible = !value
     moveBtn.style.display = value ? '' : 'none'
     if (value) {
-      showHint('Drag to turn · pinch to resize · tap a numbered marker', 6000)
+      showHint(grounding ? 'Drag to turn · pinch to enlarge · then press Lock & Ground' : 'Drag to turn · pinch to resize · tap a numbered marker', 6000)
       tourUI = createTourUI(ui, tour, {title: '', showHint: false})
       detachPicking = tour.attachPicking(camera.canvas)
     } else {
@@ -170,6 +174,7 @@ const onxrloaded = () => {
       tour.select(-1)
       showHint(ready ? 'Point the camera at the floor, then tap to place the model' : 'Loading model…')
     }
+    if (groundUI) groundUI.setAvailable(value) // Lock & Ground only makes sense once the model is placed
   }
 
   moveBtn.addEventListener('click', () => {
@@ -258,6 +263,27 @@ const onxrloaded = () => {
         anchor.scale.setScalar(baseScale)
         tour.motionLabels = data.labels || {}
         tour.setMarkers((data.markers || []).filter(m => Array.isArray(m.position) && m.position.length === 3))
+        // Ground mode: Lock & Ground freezes the model (no turning or resizing) so taps can place clamps on its parts.
+        // All of the grounding logic is shared with the 3D page (src/grounding.js) and knows nothing about the engine.
+        if (data.grounding === true || params.get('ground') === '1') {
+          grounding = createGrounding(stage, {
+            model: {slug: lib ? lib.slug : 'model', title: data.title || '', bytes: buf.byteLength, fingerprint: fingerprintOf(buf)},
+          })
+          grounding.attach(document.body, {target: canvas})
+          groundUI = createGroundUI(ui, grounding, {
+            tour,
+            shiftForLibraryBar: !!lib,
+            compact: true,
+            labels: {off: 'Lock & Ground', on: 'Unlock'},
+            lockedHint: true,
+            onModeChange: (on) => {
+              moveBtn.style.display = placed && !on ? '' : 'none'
+              if (on) showHint('')
+            },
+          })
+          groundUI.setAvailable(placed)
+          window.__ground = grounding // handy for debugging and tests
+        }
         ready = true
         splash.hide()
         if (!placed) showHint('Point the camera at the floor, then tap to place the model')
@@ -283,7 +309,7 @@ const onxrloaded = () => {
       })
       canvas.addEventListener('pointermove', (e) => {
         const p = pts.get(e.pointerId)
-        if (!p || !placed) return
+        if (!p || !placed || (grounding && grounding.enabled)) return // locked for grounding: no turning or resizing
         if (pts.size === 1) {
           const dx = e.clientX - p.x
           if (Math.abs(e.clientX - p.x) + Math.abs(e.clientY - p.y) > 3) moved = true
