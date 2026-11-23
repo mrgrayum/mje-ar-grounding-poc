@@ -71,13 +71,14 @@ const makeClampBuilder = () => {
   return {build, setPending, dispose: () => { [yellow, glow, black, gBody, gBolt, gEye].forEach(x => x.dispose()) }}
 }
 
-// ---- the pole-mounted cluster bar and the ground rod, built from simple shapes ------------------------------
-// Cluster bar frame (the "bracket"): +Z points away from the pole, +Y is up, +X runs along the bar. Unit size 1 =
-// FITTING_SIZE x the model's radius. It is drawn after the pole-mounted grounding clamp: a gray aluminum HORIZONTAL bar
-// pressed against the pole, an open hand-stick frame on top of it, a bronze pin on the left, a zinc chain from the left
-// end round the back of the pole to a screw tensioner hanging from the right end, and bronze terminals along the front of
-// the bar where the ground cables are fastened (one cable per terminal). Ground rod frame: +Y is up and the origin is
-// where the rod goes into the ground; the cable is fastened to the eye on top.
+// ---- the pole-mounted U bracket and the ground rod, built from simple shapes --------------------------------
+// U bracket frame (the "bracket"): +Z points straight out from the pole, +Y is up, +X runs across. Unit size 1 =
+// FITTING_SIZE x the model's radius. It is drawn after the pole-mounted grounding clamp in the photos: a gray aluminum
+// U that lies LEVEL and sticks straight out from the pole (two arms and a cross bar at the far end), held on the pole by a
+// zinc chain that closes the open end of the U round the back of the pole, with a bronze pin on the left arm and a screw
+// tensioner hanging from the right arm. The ground cables are fastened directly to the U: six bronze collars with a bolt
+// hanging below them, two on the cross bar and two on each arm. Ground rod frame: +Y is up and the origin is where the rod
+// goes into the ground; the cable is fastened to the eye on top.
 const makeFittingBuilder = () => {
   const alum = new THREE.MeshStandardMaterial({color: 0xb4b9bd, roughness: 0.55, metalness: 0.55})
   const zinc = new THREE.MeshStandardMaterial({color: 0xaeb6bd, roughness: 0.45, metalness: 0.8}) // the chain and the screw
@@ -85,13 +86,11 @@ const makeFittingBuilder = () => {
   const copper = new THREE.MeshStandardMaterial({color: 0xb87333, roughness: 0.4, metalness: 0.7})
   const dark = new THREE.MeshStandardMaterial({color: 0x222222, roughness: 0.6, metalness: 0.3})
   const glow = new THREE.MeshStandardMaterial({color: GROUND_CONFIG.CLAMP_COLOR, roughness: 0.45, metalness: 0.1, emissive: 0xFFEF00, emissiveIntensity: 0.6}) // waiting for its cable
-  const gBar = new THREE.BoxGeometry(4.0, 0.95, 0.7)
-  const gJaw = new THREE.BoxGeometry(0.5, 1.2, 0.7)
-  const gRail = new THREE.BoxGeometry(3.5, 0.14, 0.3) // the top of the open frame
-  const gPost = new THREE.BoxGeometry(0.14, 1.5, 0.3) // its two sides
-  const gBlock = new THREE.BoxGeometry(0.46, 0.5, 0.5) // a bronze terminal block
-  const gBolt = new THREE.CylinderGeometry(0.1, 0.1, 0.7, 10).rotateX(Math.PI / 2) // the bolt in a terminal
-  const gHead = new THREE.CylinderGeometry(0.2, 0.2, 0.14, 6).rotateX(Math.PI / 2)
+  const gArm = new THREE.BoxGeometry(0.22, 0.42, 1) // a side of the U (stretched to its length)
+  const gCross = new THREE.BoxGeometry(1, 0.42, 0.22) // the cross bar of the U (stretched to its width)
+  const gCollar = new THREE.BoxGeometry(0.38, 0.56, 0.38) // a bronze collar round the bar
+  const gBolt = new THREE.CylinderGeometry(0.06, 0.06, 0.6, 8) // hangs below the collar; the cable is fastened to its end
+  const gHead = new THREE.CylinderGeometry(0.15, 0.15, 0.14, 6)
   const gPin = new THREE.CylinderGeometry(0.11, 0.11, 0.9, 10).rotateZ(Math.PI / 2)
   const gPinEnd = new THREE.SphereGeometry(0.19, 10, 8)
   const gBody = new THREE.CylinderGeometry(0.2, 0.2, 0.9, 10) // the screw tensioner's body
@@ -104,72 +103,38 @@ const makeFittingBuilder = () => {
   const gPad = new THREE.CylinderGeometry(1.2, 1.2, 0.04, 24)
   const mesh = (geo, mat) => { const m = new THREE.Mesh(geo, mat); m.userData.noPick = true; return m }
 
-  // The chain: from one end of the bar, straight to the pole, round the back of it, and back out to the other end.
-  // poleR = radius of the pole in the bar's units; the pole's middle is at z = -poleR.
-  const chainPath = (poleR) => {
-    const A = [-1.95, 0.12]
-    const B = [1.95, 0.12]
-    const cz = -poleR
-    let rho = poleR + 0.12
-    const dMin = Math.min(Math.hypot(A[0], A[1] - cz), Math.hypot(B[0], B[1] - cz))
-    if (dMin <= rho + 0.02) rho = dMin * 0.97 // a very thick pole: keep the ring inside the reach of the bar ends
-    const tangent = (P, wantLeft) => {
-      const a = Math.atan2(P[1] - cz, P[0])
-      const b = Math.acos(rho / Math.hypot(P[0], P[1] - cz))
-      const c1 = a + b
-      const c2 = a - b
-      const left = Math.cos(c1) < Math.cos(c2) ? c1 : c2
-      const right = Math.cos(c1) < Math.cos(c2) ? c2 : c1
-      return wantLeft ? left : right
-    }
-    const TAU = Math.PI * 2
-    const norm = a => ((a % TAU) + TAU) % TAU
-    const pa = norm(tangent(A, true))
-    let pb = norm(tangent(B, false))
-    while (pb < pa) pb += TAU
-    const pts = [new THREE.Vector3(A[0], 0, A[1])]
-    const at = ph => new THREE.Vector3(rho * Math.cos(ph), 0, cz + rho * Math.sin(ph))
-    pts.push(at(pa))
-    const steps = Math.max(8, Math.ceil(((pb - pa) * rho) / 0.1))
-    for (let k = 1; k < steps; k++) pts.push(at(pa + ((pb - pa) * k) / steps))
-    pts.push(at(pb))
-    pts.push(new THREE.Vector3(B[0], 0, B[1]))
-    return pts
-  }
-
   const buildBracket = (poleR = 1.4) => {
     const g = new THREE.Group()
-    const bar = mesh(gBar, alum); bar.position.set(0, 0, 0.45); g.add(bar)
-    ;[-2.05, 2.05].forEach((x) => { const jaw = mesh(gJaw, alum); jaw.position.set(x, 0.1, 0.45); g.add(jaw) })
-    // the open frame on top (the hand-stick handle)
-    const rail = mesh(gRail, alum); rail.position.set(0, 2.1, 0.35); g.add(rail)
-    ;[-1.75, 1.75].forEach((x) => { const post = mesh(gPost, alum); post.position.set(x, 1.38, 0.35); g.add(post) })
-    // the pin on the left and the screw tensioner hanging from the right end
-    const pin = mesh(gPin, bronze); pin.position.set(-2.75, 0.55, 0.45); g.add(pin)
-    const pinEnd = mesh(gPinEnd, bronze); pinEnd.position.set(-3.25, 0.55, 0.45); g.add(pinEnd)
-    const body = mesh(gBody, alum); body.position.set(2.05, -1.0, 0.4); g.add(body)
-    const screw = mesh(gScrew, zinc); screw.position.set(2.05, -1.9, 0.4); g.add(screw)
-    const foot = mesh(gFoot, alum); foot.position.set(2.05, -2.4, 0.4); g.add(foot)
-    // the chain, as one instanced mesh of interlocking links spread along the path
-    const path = chainPath(poleR)
-    const cum = [0]
-    for (let k = 1; k < path.length; k++) cum.push(cum[k - 1] + path[k].distanceTo(path[k - 1]))
-    const total = cum[cum.length - 1]
-    const n = Math.max(10, Math.round(total / 0.27))
+    // the U: its two arms start on the pole's surface either side of the tapped spot and run straight out
+    const hw = Math.min(Math.max(poleR * 0.75, 0.9), poleR * 0.9) // half the width of the U
+    const z0 = -(poleR - Math.sqrt(poleR * poleR - hw * hw)) // where the arms meet the pole
+    const zf = 2.8 // the cross bar at the far end
+    const arms = [-hw, hw].map((x) => { const a = mesh(gArm, alum); a.scale.z = zf - z0; a.position.set(x, 0, (zf + z0) / 2); g.add(a); return a })
+    const cross = mesh(gCross, alum); cross.scale.x = 2 * hw + 0.22; cross.position.set(0, 0, zf); g.add(cross)
+    // the pin on the left arm and the screw tensioner hanging from the right arm, at the pole end
+    const pin = mesh(gPin, bronze); pin.position.set(-hw - 0.5, 0.3, z0 + 0.05); g.add(pin)
+    const pinEnd = mesh(gPinEnd, bronze); pinEnd.position.set(-hw - 1.0, 0.3, z0 + 0.05); g.add(pinEnd)
+    const body = mesh(gBody, alum); body.position.set(hw, -0.65, z0 + 0.05); g.add(body)
+    const screw = mesh(gScrew, zinc); screw.position.set(hw, -1.55, z0 + 0.05); g.add(screw)
+    const foot = mesh(gFoot, alum); foot.position.set(hw, -2.05, z0 + 0.05); g.add(foot)
+    // the chain closes the open end of the U: an arc of interlocking links round the back of the pole
+    const rho = poleR + 0.12
+    const cz = -poleR
+    const phiA = Math.atan2(z0 - cz, -hw)
+    let phiB = Math.atan2(z0 - cz, hw)
+    while (phiB < phiA) phiB += Math.PI * 2
+    const arcLen = (phiB - phiA) * rho
+    const n = Math.max(8, Math.round(arcLen / 0.27))
     const chain = new THREE.InstancedMesh(gLink, zinc, n)
     chain.userData.noPick = true
     chain.frustumCulled = false
     const up = new THREE.Vector3(0, 1, 0)
     const m4 = new THREE.Matrix4()
     const q = new THREE.Quaternion()
-    let seg = 1
     for (let k = 0; k < n; k++) {
-      const sdist = ((k + 0.5) / n) * total
-      while (seg < cum.length - 1 && cum[seg] < sdist) seg++
-      const a = path[seg - 1]
-      const b = path[seg]
-      const t = b.clone().sub(a).normalize()
-      const pos = a.clone().lerp(b, (sdist - cum[seg - 1]) / ((cum[seg] - cum[seg - 1]) || 1))
+      const ph = phiA + ((k + 0.5) / n) * (phiB - phiA)
+      const pos = new THREE.Vector3(rho * Math.cos(ph), 0, cz + rho * Math.sin(ph))
+      const t = new THREE.Vector3(-Math.sin(ph), 0, Math.cos(ph)) // along the chain
       const zAxis = k % 2 ? new THREE.Vector3().crossVectors(t, up).normalize() : up // every second link is turned a quarter turn
       const yAxis = new THREE.Vector3().crossVectors(zAxis, t)
       q.setFromRotationMatrix(m4.makeBasis(t, yAxis, zAxis))
@@ -177,17 +142,17 @@ const makeFittingBuilder = () => {
       chain.setMatrixAt(k, m4)
     }
     g.add(chain)
-    // six bronze terminals along the front of the bar, one for each cable
+    // six attachment points straight on the U: two on the cross bar, two on each arm
+    const spots = [[-0.5 * hw, zf], [0.5 * hw, zf], [-hw, 1.0], [hw, 1.0], [-hw, 1.9], [hw, 1.9]]
     const lugs = []
-    for (let i = 0; i < GROUND_CONFIG.BRACKET_LUGS; i++) {
-      const x = (i - 2.5) * 0.62
-      const block = mesh(gBlock, bronze); block.position.set(x, 0, 0.95); g.add(block)
-      const bolt = mesh(gBolt, dark); bolt.position.set(x, 0, 1.2); g.add(bolt)
-      const head = mesh(gHead, dark); head.position.set(x, 0, 1.52); g.add(head)
-      const lug = new THREE.Object3D(); lug.position.set(x, 0, 1.6); g.add(lug) // where a cable is fastened
+    spots.forEach(([x, z]) => {
+      const collar = mesh(gCollar, bronze); collar.position.set(x, -0.1, z); g.add(collar)
+      const bolt = mesh(gBolt, dark); bolt.position.set(x, -0.6, z); g.add(bolt)
+      const head = mesh(gHead, dark); head.position.set(x, -0.95, z); g.add(head)
+      const lug = new THREE.Object3D(); lug.position.set(x, -1.05, z); g.add(lug) // where a cable is fastened
       lugs.push(lug)
-    }
-    g.userData = {noPick: true, main: bar, baseMat: alum, lugs, radius: 3.4, axis: [0, 0, 1], chain}
+    })
+    g.userData = {noPick: true, main: cross, glowMeshes: [...arms, cross], baseMat: alum, lugs, radius: 3.2, axis: [0, 0, 1], chain}
     return g
   }
   const buildRod = () => {
@@ -200,8 +165,11 @@ const makeFittingBuilder = () => {
     g.userData = {noPick: true, main: rod, baseMat: copper, lugs: [tip], radius: 2.4, axis: [0, 1, 0]}
     return g
   }
-  const setPending = (f, on) => { f.group.userData.main.material = on ? glow : f.group.userData.baseMat }
-  return {buildBracket, buildRod, setPending, glow, disposeOne: (g) => { if (g.userData.chain) g.userData.chain.dispose() }, dispose: () => { [alum, zinc, bronze, copper, dark, glow, gBar, gJaw, gRail, gPost, gBlock, gBolt, gHead, gPin, gPinEnd, gBody, gScrew, gFoot, gLink, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
+  const setPending = (f, on) => {
+    const u = f.group.userData
+    ;(u.glowMeshes || [u.main]).forEach((m) => { m.material = on ? glow : u.baseMat })
+  }
+  return {buildBracket, buildRod, setPending, glow, disposeOne: (g) => { if (g.userData.chain) g.userData.chain.dispose() }, dispose: () => { [alum, zinc, bronze, copper, dark, glow, gArm, gCross, gCollar, gBolt, gHead, gPin, gPinEnd, gBody, gScrew, gFoot, gLink, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
 }
 
 // ---- main factory ---------------------------------------------------------------------------------
