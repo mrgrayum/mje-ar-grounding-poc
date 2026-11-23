@@ -52,13 +52,24 @@ Tested on the generated structure, with optimization forced on (the app normally
 3. **Each part's own coordinate system is rewritten.** The compression stores every part's vertices in a small normalized range and moves the scale and offset into the part's own transform. Example: `Pole` goes from scale 1 to scale 6 and origin height 0 to 6, `PhaseB_Conductor` from scale 1 to 4.007. **Where the part sits in space does not change** (all parts match within 0.2 mm), but a point stored as `{node, local: [x, y, z]}` has different numbers before and after optimization.
 4. **Consequence:** a record that stores `local` coordinates is only valid against the exact published `model.glb` it was made on. Re-publishing the model (re-optimizing) could shift stored positions. Options for the record format and the optimizer are written up with the Stage 2 plan.
 
+## Ground mode (Stage 2, 3D viewer)
+
+Available only on models whose `markers.json` has `"grounding": true` (add `?ground=1` to a model address to try it on any model), and not in embedded frames. The **Ground mode** button sits under the 3D / AR switch. While it is on, marker badges and tour arrows are hidden and a panel shows what to do next, the list of grounds, **Undo last** and **Clear all**; each row has a ✕ to delete just that pair.
+
+- **Tap = place.** A tap must move less than 6 px and last under 0.5 s; anything else is a drag (rotate/zoom) and places nothing. Tapping empty space does nothing.
+- **First tap** places a pulsing clamp on the part under the finger. **Second tap** places the other clamp and draws a green cable between them. The next tap starts the next pair (G1, G2, G3...).
+- **Clamps belong to the part.** Each clamp is a child of the tapped part's node, at the tapped point on its surface, so it moves with that part. Its size is corrected for the part's own scale (see Stage 1 findings).
+- **Cable sag.** A parabola with a droop of 10 percent of the span (`SAG_RATIO` in `src/grounding.js`). A mostly level cable droops down; a mostly vertical one (phase to ground lead) bows outward, away from the surfaces it is clamped to, because "down" would only lay it along the pole.
+- **Settings** (sag, sizes, colors, tap limits) are in `GROUND_CONFIG` at the top of `src/grounding.js`. Sizes are fractions of the model's radius, so they scale with any model.
+- **In-memory record** (`grounding.snapshot()`), one entry per completed ground: `{id, a: {node, local, model}, b: {node, local, model}, placedAt}`. `node` is the tapped part's name, `local` the point in that part's own coordinates, `model` the same point in the model's overall coordinates (a backup, because `local` changes if a model is re-optimized). Export and reload come in Stage 3.
+
 ## Progress log
 
 | Stage | Date | What changed | Verified by the project owner |
 |---|---|---|---|
 | 0. New repo and verified baseline | 2026-11-23 | Repository created from the live library `mje-ar` at commit `bedfd17`. Copy matches the original file for file (54 files, same hashes). Added the web source (`src/`), `build-web.mjs` (rebuilt bundles are byte-identical to the published ones), `serve.mjs`, this README. No behaviour changes. | 2026-11-23: all four checks passed (library and demo models, 3D page with markers and tour, iPhone AR placement, original site unchanged). |
 | 1. Test structure with named parts | 2026-11-23 | Added `tools/make-structure.mjs` (generates the structure), `tools/check-nodes.mjs` (lists the parts in any .glb), `tools/optimize-check.mjs` (tests what the optimizer does to named parts), the generated `tools/generated/test-pole.glb`, and the published model `models/test-pole-structure/` with two sample markers. New dev-only tools: glTF Transform and meshoptimizer (same versions as the MJE AR app). No change to the viewer, AR code or engine. See "Stage 1 findings" below. | 2026-11-23: all four checks passed (structure in library with distinct parts, markers on the correct parts, part listing complete, iPhone AR placement). |
-| 2. Ground mode in the 3D viewer | | | |
+| 2. Ground mode in the 3D viewer | 2026-11-23 | New `src/grounding.js` (shared by the 3D viewer now and the AR page in Stage 4; needs only the camera, the model and a per-frame tick). `src/viewer-main.js` switches it on for models with `"grounding": true` in `markers.json`; `src/core.js` gets a two-line switch (`pickingEnabled`) so marker taps are off in Ground mode. `models/test-pole-structure/markers.json` flagged. See "Ground mode" below. No change to the AR page logic, engine files or other models. | Pending |
 | 3. Session record: save, export, reload | | | |
 | 4. Ground mode in AR (iPhone) | | | |
 | 5. Minimal recipe builder | | | |

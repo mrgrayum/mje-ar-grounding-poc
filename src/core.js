@@ -596,6 +596,7 @@ export class MarkerTour {
       if (!down) return
       const d = down
       down = null
+      if (this.pickingEnabled === false) return // e.g. Ground mode: taps place clamps instead of opening markers
       if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 8 || performance.now() - d.t > 700) return
       const idx = this.pickAt(e.clientX, e.clientY, e.pointerType === 'mouse' ? 24 : 34)
       if (idx < 0) {

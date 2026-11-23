@@ -3,6 +3,7 @@ import {createStage, MarkerTour, injectStyles, glbInfo, needsDraco, isPhoneOrTab
 import {createTourUI} from './tour-ui.js'
 import {createSplash} from './splash.js'
 import {libContext, addLibraryChrome} from './libchrome.js'
+import {createGrounding, createGroundUI} from './grounding.js'
 
 const b64ToBuffer = (b64) => {
   const bin = atob(b64)
@@ -77,6 +78,14 @@ async function main() {
     createTourUI(root, tour, {title: lib ? '' : (data.title || '')})
     tour.attachPicking(root)
     if (lib) addLibraryChrome(root, lib, {title: data.title || '', page: '3d', canAR: data.mode === 'ar'})
+    // Ground mode (temporary protective grounding): only for models flagged "grounding": true in markers.json
+    // (or with ?ground=1 added to the address for testing), and not in embedded frames.
+    if ((data.grounding === true || new URLSearchParams(location.search).get('ground') === '1') && !(lib && lib.embed)) {
+      const grounding = createGrounding(stage)
+      grounding.attach(root)
+      createGroundUI(root, grounding, {tour, shiftForLibraryBar: !!lib && data.mode === 'ar'})
+      window.__ground = grounding // handy for debugging and tests
+    }
     if (!window.__VIEWER_DATA__ && !lib) {
       // Hosted folder: link the credits page that ships alongside.
       const credits = document.createElement('a')

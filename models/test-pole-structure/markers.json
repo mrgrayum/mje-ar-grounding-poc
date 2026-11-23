@@ -2,6 +2,7 @@
   "version": 2,
   "title": "Test Pole Structure",
   "mode": "ar",
+  "grounding": true,
   "model": "model.glb",
   "markers": [
     {
