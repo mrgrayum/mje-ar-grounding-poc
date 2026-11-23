@@ -71,27 +71,32 @@ const makeClampBuilder = () => {
   return {build, setPending, dispose: () => { [yellow, glow, black, gBody, gBolt, gEye].forEach(x => x.dispose()) }}
 }
 
-// ---- the cluster bar and the ground rod, built from simple shapes ----------------------------------------
-// Cluster bar frame (the "bracket"): +Z points away from the pole, +Y is up. Unit size 1 = FITTING_SIZE x the model's
-// radius. It looks like the pole-mounted cluster bars used on wood poles: a gray aluminum body held on the pole by a
-// chain that goes all the way round it, with a pin on one side and a screw tensioner on the other, and six bronze
-// terminal studs where the ground cables are fastened (one cable per stud). Ground rod frame: +Y is up and the origin
-// is where the rod goes into the ground; the cable is fastened to the eye on top.
+// ---- the pole-mounted cluster bar and the ground rod, built from simple shapes ------------------------------
+// Cluster bar frame (the "bracket"): +Z points away from the pole, +Y is up, +X runs along the bar. Unit size 1 =
+// FITTING_SIZE x the model's radius. It is drawn after the pole-mounted grounding clamp: a gray aluminum HORIZONTAL bar
+// pressed against the pole, an open hand-stick frame on top of it, a bronze pin on the left, a zinc chain from the left
+// end round the back of the pole to a screw tensioner hanging from the right end, and bronze terminals along the front of
+// the bar where the ground cables are fastened (one cable per terminal). Ground rod frame: +Y is up and the origin is
+// where the rod goes into the ground; the cable is fastened to the eye on top.
 const makeFittingBuilder = () => {
   const alum = new THREE.MeshStandardMaterial({color: 0xb4b9bd, roughness: 0.55, metalness: 0.55})
-  const zinc = new THREE.MeshStandardMaterial({color: 0xaeb6bd, roughness: 0.45, metalness: 0.8}) // the chain
+  const zinc = new THREE.MeshStandardMaterial({color: 0xaeb6bd, roughness: 0.45, metalness: 0.8}) // the chain and the screw
   const bronze = new THREE.MeshStandardMaterial({color: 0xc08a4a, roughness: 0.4, metalness: 0.75})
   const copper = new THREE.MeshStandardMaterial({color: 0xb87333, roughness: 0.4, metalness: 0.7})
   const dark = new THREE.MeshStandardMaterial({color: 0x222222, roughness: 0.6, metalness: 0.3})
   const glow = new THREE.MeshStandardMaterial({color: GROUND_CONFIG.CLAMP_COLOR, roughness: 0.45, metalness: 0.1, emissive: 0xFFEF00, emissiveIntensity: 0.6}) // waiting for its cable
-  const gBody = new THREE.BoxGeometry(0.9, 5.4, 0.6)
-  const gFlange = new THREE.BoxGeometry(1.15, 0.18, 0.72)
-  const gPlate = new THREE.BoxGeometry(0.6, 3.8, 0.06)
-  const gStud = new THREE.CylinderGeometry(0.14, 0.14, 0.75, 12).rotateX(Math.PI / 2)
-  const gNut = new THREE.CylinderGeometry(0.26, 0.26, 0.2, 6).rotateX(Math.PI / 2)
-  const gPin = new THREE.CylinderGeometry(0.1, 0.1, 0.9, 10).rotateZ(Math.PI / 2)
-  const gPinEnd = new THREE.SphereGeometry(0.17, 10, 8)
-  const gKnob = new THREE.CylinderGeometry(0.28, 0.28, 0.16, 14).rotateZ(Math.PI / 2)
+  const gBar = new THREE.BoxGeometry(4.0, 0.95, 0.7)
+  const gJaw = new THREE.BoxGeometry(0.5, 1.2, 0.7)
+  const gRail = new THREE.BoxGeometry(3.5, 0.14, 0.3) // the top of the open frame
+  const gPost = new THREE.BoxGeometry(0.14, 1.5, 0.3) // its two sides
+  const gBlock = new THREE.BoxGeometry(0.46, 0.5, 0.5) // a bronze terminal block
+  const gBolt = new THREE.CylinderGeometry(0.1, 0.1, 0.7, 10).rotateX(Math.PI / 2) // the bolt in a terminal
+  const gHead = new THREE.CylinderGeometry(0.2, 0.2, 0.14, 6).rotateX(Math.PI / 2)
+  const gPin = new THREE.CylinderGeometry(0.11, 0.11, 0.9, 10).rotateZ(Math.PI / 2)
+  const gPinEnd = new THREE.SphereGeometry(0.19, 10, 8)
+  const gBody = new THREE.CylinderGeometry(0.2, 0.2, 0.9, 10) // the screw tensioner's body
+  const gScrew = new THREE.CylinderGeometry(0.07, 0.07, 0.9, 8)
+  const gFoot = new THREE.CylinderGeometry(0.34, 0.34, 0.12, 12)
   const gLink = new THREE.TorusGeometry(0.1, 0.04, 6, 12).scale(1.5, 1, 1) // one chain link, long side along x
   const gRod = new THREE.CylinderGeometry(0.15, 0.15, 4.2, 12) // from 1.2 below the ground to 3 above it
   const gCap = new THREE.SphereGeometry(0.3, 12, 8)
@@ -99,47 +104,90 @@ const makeFittingBuilder = () => {
   const gPad = new THREE.CylinderGeometry(1.2, 1.2, 0.04, 24)
   const mesh = (geo, mat) => { const m = new THREE.Mesh(geo, mat); m.userData.noPick = true; return m }
 
-  // poleR: the radius of the pole at this spot, in the bar's own units, so the chain goes round the pole exactly.
+  // The chain: from one end of the bar, straight to the pole, round the back of it, and back out to the other end.
+  // poleR = radius of the pole in the bar's units; the pole's middle is at z = -poleR.
+  const chainPath = (poleR) => {
+    const A = [-1.95, 0.12]
+    const B = [1.95, 0.12]
+    const cz = -poleR
+    let rho = poleR + 0.12
+    const dMin = Math.min(Math.hypot(A[0], A[1] - cz), Math.hypot(B[0], B[1] - cz))
+    if (dMin <= rho + 0.02) rho = dMin * 0.97 // a very thick pole: keep the ring inside the reach of the bar ends
+    const tangent = (P, wantLeft) => {
+      const a = Math.atan2(P[1] - cz, P[0])
+      const b = Math.acos(rho / Math.hypot(P[0], P[1] - cz))
+      const c1 = a + b
+      const c2 = a - b
+      const left = Math.cos(c1) < Math.cos(c2) ? c1 : c2
+      const right = Math.cos(c1) < Math.cos(c2) ? c2 : c1
+      return wantLeft ? left : right
+    }
+    const TAU = Math.PI * 2
+    const norm = a => ((a % TAU) + TAU) % TAU
+    const pa = norm(tangent(A, true))
+    let pb = norm(tangent(B, false))
+    while (pb < pa) pb += TAU
+    const pts = [new THREE.Vector3(A[0], 0, A[1])]
+    const at = ph => new THREE.Vector3(rho * Math.cos(ph), 0, cz + rho * Math.sin(ph))
+    pts.push(at(pa))
+    const steps = Math.max(8, Math.ceil(((pb - pa) * rho) / 0.1))
+    for (let k = 1; k < steps; k++) pts.push(at(pa + ((pb - pa) * k) / steps))
+    pts.push(at(pb))
+    pts.push(new THREE.Vector3(B[0], 0, B[1]))
+    return pts
+  }
+
   const buildBracket = (poleR = 1.4) => {
     const g = new THREE.Group()
-    const body = mesh(gBody, alum); body.position.z = 0.4; g.add(body)
-    ;[2.75, -2.75].forEach((y) => { const f = mesh(gFlange, alum); f.position.set(0, y, 0.43); g.add(f) })
-    const plate = mesh(gPlate, dark); plate.position.set(0, 0, 0.72); g.add(plate) // the maker's plate, a darker panel the studs stand on
-    // the chain: a ring of interlocking links round the pole at the middle of the bar, hidden behind the body at the front
-    const ringR = poleR + 0.11
-    const n = Math.max(12, Math.round((2 * Math.PI * ringR) / 0.27))
+    const bar = mesh(gBar, alum); bar.position.set(0, 0, 0.45); g.add(bar)
+    ;[-2.05, 2.05].forEach((x) => { const jaw = mesh(gJaw, alum); jaw.position.set(x, 0.1, 0.45); g.add(jaw) })
+    // the open frame on top (the hand-stick handle)
+    const rail = mesh(gRail, alum); rail.position.set(0, 2.1, 0.35); g.add(rail)
+    ;[-1.75, 1.75].forEach((x) => { const post = mesh(gPost, alum); post.position.set(x, 1.38, 0.35); g.add(post) })
+    // the pin on the left and the screw tensioner hanging from the right end
+    const pin = mesh(gPin, bronze); pin.position.set(-2.75, 0.55, 0.45); g.add(pin)
+    const pinEnd = mesh(gPinEnd, bronze); pinEnd.position.set(-3.25, 0.55, 0.45); g.add(pinEnd)
+    const body = mesh(gBody, alum); body.position.set(2.05, -1.0, 0.4); g.add(body)
+    const screw = mesh(gScrew, zinc); screw.position.set(2.05, -1.9, 0.4); g.add(screw)
+    const foot = mesh(gFoot, alum); foot.position.set(2.05, -2.4, 0.4); g.add(foot)
+    // the chain, as one instanced mesh of interlocking links spread along the path
+    const path = chainPath(poleR)
+    const cum = [0]
+    for (let k = 1; k < path.length; k++) cum.push(cum[k - 1] + path[k].distanceTo(path[k - 1]))
+    const total = cum[cum.length - 1]
+    const n = Math.max(10, Math.round(total / 0.27))
     const chain = new THREE.InstancedMesh(gLink, zinc, n)
     chain.userData.noPick = true
     chain.frustumCulled = false
     const up = new THREE.Vector3(0, 1, 0)
     const m4 = new THREE.Matrix4()
     const q = new THREE.Quaternion()
+    let seg = 1
     for (let k = 0; k < n; k++) {
-      const th = (k / n) * Math.PI * 2
-      const r = new THREE.Vector3(Math.sin(th), 0, Math.cos(th)) // outward from the pole's middle
-      const t = new THREE.Vector3(Math.cos(th), 0, -Math.sin(th)) // along the chain
-      const zAxis = k % 2 ? r : up // every second link is turned a quarter turn
+      const sdist = ((k + 0.5) / n) * total
+      while (seg < cum.length - 1 && cum[seg] < sdist) seg++
+      const a = path[seg - 1]
+      const b = path[seg]
+      const t = b.clone().sub(a).normalize()
+      const pos = a.clone().lerp(b, (sdist - cum[seg - 1]) / ((cum[seg] - cum[seg - 1]) || 1))
+      const zAxis = k % 2 ? new THREE.Vector3().crossVectors(t, up).normalize() : up // every second link is turned a quarter turn
       const yAxis = new THREE.Vector3().crossVectors(zAxis, t)
       q.setFromRotationMatrix(m4.makeBasis(t, yAxis, zAxis))
-      m4.compose(new THREE.Vector3(0, 0, -poleR).addScaledVector(r, ringR), q, new THREE.Vector3(1, 1, 1))
+      m4.compose(pos, q, new THREE.Vector3(1, 1, 1))
       chain.setMatrixAt(k, m4)
     }
     g.add(chain)
-    // the pin on one side and the screw tensioner (a rod with a round knob) on the other
-    const pin = mesh(gPin, bronze); pin.position.set(-0.9, 0.35, 0.35); g.add(pin)
-    const pinEnd = mesh(gPinEnd, bronze); pinEnd.position.set(-1.38, 0.35, 0.35); g.add(pinEnd)
-    const screw = mesh(gPin, zinc); screw.position.set(0.9, 0.35, 0.35); g.add(screw)
-    const knob = mesh(gKnob, bronze); knob.position.set(1.4, 0.35, 0.35); g.add(knob)
-    // six bronze terminal studs, one for each cable
+    // six bronze terminals along the front of the bar, one for each cable
     const lugs = []
     for (let i = 0; i < GROUND_CONFIG.BRACKET_LUGS; i++) {
-      const y = (2.5 - i) * 0.85
-      const stud = mesh(gStud, bronze); stud.position.set(0, y, 1.09); g.add(stud)
-      const nut = mesh(gNut, bronze); nut.position.set(0, y, 0.88); g.add(nut)
-      const lug = new THREE.Object3D(); lug.position.set(0, y, 1.45); g.add(lug) // where a cable is fastened
+      const x = (i - 2.5) * 0.62
+      const block = mesh(gBlock, bronze); block.position.set(x, 0, 0.95); g.add(block)
+      const bolt = mesh(gBolt, dark); bolt.position.set(x, 0, 1.2); g.add(bolt)
+      const head = mesh(gHead, dark); head.position.set(x, 0, 1.52); g.add(head)
+      const lug = new THREE.Object3D(); lug.position.set(x, 0, 1.6); g.add(lug) // where a cable is fastened
       lugs.push(lug)
     }
-    g.userData = {noPick: true, main: body, baseMat: alum, lugs, radius: 3.2, axis: [0, 0, 1], chain}
+    g.userData = {noPick: true, main: bar, baseMat: alum, lugs, radius: 3.4, axis: [0, 0, 1], chain}
     return g
   }
   const buildRod = () => {
@@ -153,7 +201,7 @@ const makeFittingBuilder = () => {
     return g
   }
   const setPending = (f, on) => { f.group.userData.main.material = on ? glow : f.group.userData.baseMat }
-  return {buildBracket, buildRod, setPending, glow, disposeOne: (g) => { if (g.userData.chain) g.userData.chain.dispose() }, dispose: () => { [alum, zinc, bronze, copper, dark, glow, gBody, gFlange, gPlate, gStud, gNut, gPin, gPinEnd, gKnob, gLink, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
+  return {buildBracket, buildRod, setPending, glow, disposeOne: (g) => { if (g.userData.chain) g.userData.chain.dispose() }, dispose: () => { [alum, zinc, bronze, copper, dark, glow, gBar, gJaw, gRail, gPost, gBlock, gBolt, gHead, gPin, gPinEnd, gBody, gScrew, gFoot, gLink, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
 }
 
 // ---- main factory ---------------------------------------------------------------------------------
