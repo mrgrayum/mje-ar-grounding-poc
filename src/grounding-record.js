@@ -8,15 +8,19 @@
 //                   "conductors": {"PhaseA_Conductor": "A Phase", ...}},   the name given to each conductor
 //     "student": "...", "scenario": "...",
 //     "sessionStart": ISO time of the first clamp, "sessionEnd": ISO time of the export,
-//     "fittings": [],                                           reserved: cluster brackets and ground rods (a later step)
+//     "fittings": [{                                            hardware: cluster brackets and ground rods
+//       "id": "B1", "type": "cluster_bracket" | "ground_rod", "label": "Bracket 1",
+//       "node": "Pole" (the part a bracket is on; empty for a rod), "local", "model": [x,y,z], "normal": [x,y,z], "placedAt"
+//     }],
 //     "grounds": [{
 //       "id": "G1",
 //       "a": {"kind": "clamp", "node", "label", "local": [x,y,z], "model": [x,y,z], "normal": [x,y,z]},
-//       "b": {...same...},
+//       "b": {"kind": "fitting", "fitting": "B1", "label": "Bracket 1", "slot": 2},   (an end can be a clamp or a piece of hardware)
 //       "placedAt": ISO time
 //     }]
 //   }
 //
+// slot   = which stud of a cluster bracket the cable is fastened to (0 = top).
 // node   = name of the part that was tapped (the part's name in the 3D model).
 // label  = the name the user gave that connection point (for example "B Phase"): the name used for tracking.
 // local  = the tapped point in that part's own coordinates (changes if the model is re-optimized).
@@ -29,8 +33,14 @@ export const RECORD_FORMAT = 'mje-grounding-record'
 export const RECORD_VERSION = 2
 
 const isVec3 = v => Array.isArray(v) && v.length === 3 && v.every(n => typeof n === 'number' && Number.isFinite(n))
-const isEnd = e => e && typeof e.node === 'string' && e.node && isVec3(e.model) && isVec3(e.local)
-  && (e.normal === undefined || isVec3(e.normal)) && (e.label === undefined || typeof e.label === 'string')
+const isEnd = (e) => {
+  if (!e) return false
+  if (e.kind === 'fitting') return typeof e.fitting === 'string' && !!e.fitting && (e.label === undefined || typeof e.label === 'string')
+  return typeof e.node === 'string' && !!e.node && isVec3(e.model) && isVec3(e.local)
+    && (e.normal === undefined || isVec3(e.normal)) && (e.label === undefined || typeof e.label === 'string')
+}
+const isFitting = f => f && typeof f.id === 'string' && !!f.id && (f.type === 'ground_rod' || (f.type === 'cluster_bracket' && typeof f.node === 'string' && !!f.node))
+  && isVec3(f.model) && (f.normal === undefined || isVec3(f.normal)) && (f.label === undefined || typeof f.label === 'string')
 const text = (v, max) => String(v === undefined || v === null ? '' : v).trim().slice(0, max)
 
 export const emptyStructure = () => ({number: '', line: '', job: '', conductors: {}})
@@ -63,6 +73,8 @@ export function parseRecord(text0) {
   for (const g of rec.grounds) {
     if (!g || typeof g.id !== 'string' || !isEnd(g.a) || !isEnd(g.b)) return {ok: false, error: 'One of the grounds in the record is damaged.'}
   }
+  const fittings = Array.isArray(rec.fittings) ? rec.fittings : []
+  for (const f of fittings) if (!isFitting(f)) return {ok: false, error: 'One of the brackets or rods in the record is damaged.'}
   const st = rec.structure && typeof rec.structure === 'object' ? rec.structure : {}
   const conductors = st.conductors && typeof st.conductors === 'object' ? st.conductors : {}
   const record = {
@@ -70,7 +82,7 @@ export function parseRecord(text0) {
     version: RECORD_VERSION, // read as the current shape
     sourceVersion: rec.version,
     structure: {number: text(st.number, 60), line: text(st.line, 80), job: text(st.job, 60), conductors},
-    fittings: Array.isArray(rec.fittings) ? rec.fittings : [],
+    fittings,
     student: text(rec.student, 60),
     scenario: text(rec.scenario, 80),
     grounds: rec.grounds.map(g => ({...g, a: {kind: 'clamp', ...g.a}, b: {kind: 'clamp', ...g.b}})),
