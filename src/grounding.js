@@ -73,10 +73,10 @@ const makeClampBuilder = () => {
 
 // ---- the pole-mounted cluster bracket and the ground rod, built from simple shapes ------------------------
 // Bracket frame: +Z points straight out from the pole, +Y is up, +X runs across. Unit size 1 = FITTING_SIZE x the model's
-// radius. It is drawn after the chain-type pole clamp in the photos: a zinc CHAIN that wraps round the pole, a gray jaw on
-// the front of the pole where the chain ends meet, a screw tensioner with a bronze knob, and a square gray U that lies
-// level and sticks straight out from the jaw (two arms and a cross bar at the far end). The ground clamps go straight on
-// the U, exactly as they go on a wire: there are no studs or terminals. Ground rod frame: +Y is up and the origin is
+// radius. It is drawn after the chain-type pole clamp in the photos: a zinc CHAIN that wraps round the pole, and a square
+// gray U that lies level and sticks straight out from the pole (two arms, whose rear ends are where the chain ends are,
+// and a cross bar at the far end). The ground clamps go straight on the U, exactly as they go on a wire: there are no
+// studs or terminals. Ground rod frame: +Y is up and the origin is
 // where the rod goes into the ground; the cable is fastened to the eye on top.
 const makeFittingBuilder = () => {
   const alum = new THREE.MeshStandardMaterial({color: 0xb4b9bd, roughness: 0.55, metalness: 0.55})
@@ -87,10 +87,6 @@ const makeFittingBuilder = () => {
   const glow = new THREE.MeshStandardMaterial({color: GROUND_CONFIG.CLAMP_COLOR, roughness: 0.45, metalness: 0.1, emissive: 0xFFEF00, emissiveIntensity: 0.6}) // waiting for its cable
   const gArm = new THREE.BoxGeometry(0.32, 0.36, 1) // a side of the U (stretched to its length)
   const gCross = new THREE.BoxGeometry(1, 0.36, 0.32) // the cross bar of the U (stretched to its width)
-  const gJaw = new THREE.BoxGeometry(1, 0.55, 0.42) // the jaw the chain ends meet at (stretched to its width)
-  const gBody = new THREE.CylinderGeometry(0.17, 0.17, 0.9, 10).rotateZ(Math.PI / 2) // the screw tensioner's body
-  const gScrew = new THREE.CylinderGeometry(0.06, 0.06, 0.7, 8).rotateZ(Math.PI / 2)
-  const gKnob = new THREE.SphereGeometry(0.28, 12, 8)
   const gLink = new THREE.TorusGeometry(0.1, 0.04, 6, 12).scale(1.5, 1, 1) // one chain link, long side along x
   const gRod = new THREE.CylinderGeometry(0.15, 0.15, 4.2, 12) // from 1.2 below the ground to 3 above it
   const gCap = new THREE.SphereGeometry(0.3, 12, 8)
@@ -102,19 +98,14 @@ const makeFittingBuilder = () => {
   // poleR = radius of the pole at this spot in the bracket's units, so the chain goes round it exactly.
   const buildBracket = (poleR = 1.4) => {
     const g = new THREE.Group()
-    const hw = Math.min(0.75, poleR * 0.9) // half the width of the jaw
-    const z0 = -(poleR - Math.sqrt(poleR * poleR - hw * hw)) // where the jaw's ends meet the pole's surface
-    const zf = 2.4 // the cross bar at the far end of the U
-    const zb = z0 + 0.2 // where the arms leave the jaw
-    const ux = hw - 0.1 // the arms stand a little inside the jaw's ends
+    const hw = Math.min(0.75, poleR * 0.9) // half the width of the U
+    const z0 = -(poleR - Math.sqrt(poleR * poleR - hw * hw)) // where the arms meet the pole's surface
+    const zf = 1.2 // the cross bar at the far end of the U
+    const zb = z0 // the arms start on the pole's surface, where the chain ends are
+    const ux = hw // the arms are where the chain ends
     const arms = [-ux, ux].map((x) => { const a = mesh(gArm, alum, true); a.scale.z = zf - zb; a.position.set(x, 0, (zf + zb) / 2); g.add(a); return a })
     const cross = mesh(gCross, alum, true); cross.scale.x = 2 * ux + 0.32; cross.position.set(0, 0, zf); g.add(cross)
-    const jaw = mesh(gJaw, alum); jaw.scale.x = 2 * hw; jaw.position.set(0, 0, z0 + 0.1); g.add(jaw)
-    // the screw tensioner sticks out sideways from the left end of the jaw, ending in a bronze knob
-    const body = mesh(gBody, alum); body.position.set(-hw - 0.45, 0, z0 + 0.1); g.add(body)
-    const screw = mesh(gScrew, zinc); screw.position.set(-hw - 1.15, 0, z0 + 0.1); g.add(screw)
-    const knob = mesh(gKnob, bronze); knob.position.set(-hw - 1.6, 0, z0 + 0.1); g.add(knob)
-    // the chain: an arc of interlocking links from one end of the jaw, round the back of the pole, to the other
+    // the chain: an arc of interlocking links from one arm of the U, round the back of the pole, to the other
     const rho = poleR + 0.12
     const cz = -poleR
     const phiA = Math.atan2(z0 - cz, -hw)
@@ -144,7 +135,7 @@ const makeFittingBuilder = () => {
     const samples = []
     for (let z = zb + 0.3; z <= zf + 0.001; z += 0.3) { samples.push(new THREE.Vector3(-ux, 0, z)); samples.push(new THREE.Vector3(ux, 0, z)) }
     for (let x = -ux; x <= ux + 0.001; x += 0.3) samples.push(new THREE.Vector3(x, 0, zf))
-    g.userData = {noPick: true, glowMeshes: [...arms, cross], baseMat: alum, lugs: [], radius: 3.0, axis: [0, 0, 1], chain, bracketU: {underY: -0.18, samples}}
+    g.userData = {noPick: true, glowMeshes: [...arms, cross], baseMat: alum, lugs: [], radius: 2.2, axis: [0, 0, 1], chain, bracketU: {underY: -0.18, samples}}
     return g
   }
   const buildRod = () => {
@@ -161,7 +152,7 @@ const makeFittingBuilder = () => {
     const u = f.group.userData
     ;(u.glowMeshes || (u.main ? [u.main] : [])).forEach((m) => { m.material = on ? glow : u.baseMat })
   }
-  return {buildBracket, buildRod, setPending, glow, disposeOne: (g) => { if (g.userData.chain) g.userData.chain.dispose() }, dispose: () => { [alum, zinc, bronze, copper, dark, glow, gArm, gCross, gJaw, gBody, gScrew, gKnob, gLink, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
+  return {buildBracket, buildRod, setPending, glow, disposeOne: (g) => { if (g.userData.chain) g.userData.chain.dispose() }, dispose: () => { [alum, zinc, bronze, copper, dark, glow, gArm, gCross, gLink, gRod, gCap, gEye, gPad].forEach(x => x.dispose()) }}
 }
 
 // ---- main factory ---------------------------------------------------------------------------------
