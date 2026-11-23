@@ -703,13 +703,21 @@ export class MarkerTour {
     // While the card is moving, including the slow tail as the model coasts to a stop, it follows the marker to a
     // fraction of a pixel (whole-pixel steps would hop against the smoothly gliding marker and look like shaking).
     // Only once it has been completely still for a quarter of a second does it snap to whole pixels so text is sharp.
+    // The snapped spot is sticky: it only changes if the card really moves more than three quarters of a pixel from it.
+    // (After an arrow move the marker sits at the exact middle of the screen, which can put the card right on a half
+    // pixel; without this, tiny floating-point noise flipped the rounding back and forth every frame.)
     const last = this._lastXY
     const still = last && Math.abs(x - last[0]) < 0.003 && Math.abs(y - last[1]) < 0.003
     this._stillFrames = still ? (this._stillFrames || 0) + 1 : 0
     this._lastXY = [x, y]
-    this.card.style.transform = this._stillFrames >= 15
-      ? `translate(${Math.round(x)}px, ${Math.round(y)}px)`
-      : `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`
+    if (this._stillFrames < 15) {
+      this._snap = null
+      this.card.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`
+      return
+    }
+    const s = this._snap
+    if (!s || Math.abs(x - s[0]) > 0.75 || Math.abs(y - s[1]) > 0.75) this._snap = [Math.round(x), Math.round(y)]
+    this.card.style.transform = `translate(${this._snap[0]}px, ${this._snap[1]}px)`
   }
 
   dispose() {
