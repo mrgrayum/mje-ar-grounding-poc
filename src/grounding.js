@@ -13,7 +13,11 @@ import {buildRecord, parseRecord, shareOrDownloadRecord} from './grounding-recor
 
 // ---- settings you can tweak ------------------------------------------------------------------------
 export const GROUND_CONFIG = {
-  SAG_RATIO: 0.10, // cable droop as a fraction of the span between the clamps
+  CABLE_SLACK: 0.12, // extra cable length beyond the straight distance between its two ends (more = deeper, looser hang)
+  CABLE_STIFFNESS: 0.05, // how much the cable resists sharp bends (0 = string, higher = stiffer heavy cable)
+  CABLE_GRAVITY: 0.02, // how hard gravity pulls each settling step (only affects how fast it settles)
+  CABLE_NODES: 32, // points along the cable while it settles
+  CABLE_SETTLE_STEPS: 700, // settling steps (more = calmer final shape, a little slower)
   CABLE_RADIUS: 0.0045, // as a fraction of the model's radius (about 3.3 cm radius on the test pole)
   CLAMP_SIZE: 0.02, // as a fraction of the model's radius (about 15 cm wide on the test pole)
   CLAMP_COLOR: 0xFFEF00, // MJE yellow
@@ -235,25 +239,155 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     }
   }
 
-  // ---- the sagging cable ------------------------------------------------------------------------
-  const cableCurve = (A, B, nA, nB) => {
-    const chord = B.clone().sub(A)
-    const len = chord.length() || 1e-6
-    const sag = cfg.SAG_RATIO * len
-    // Mostly level cable: it droops down. Mostly vertical cable: "down" would just lay it along the pole, so it
-    // bows outward instead (away from the surfaces it is clamped to).
-    const vertical = Math.abs(chord.y) / len
-    const s = THREE.MathUtils.smoothstep(vertical, 0.5, 0.85)
-    const out = nA.clone().add(nB)
-    out.y = 0
-    if (out.length() < 0.2) out.set(0, 0, 1)
-    out.normalize()
-    const dir = new THREE.Vector3(0, -1, 0).multiplyScalar(1 - s).add(out.multiplyScalar(s)).normalize()
-    const pts = []
-    for (let i = 0; i <= 28; i++) {
-      const t = i / 28
-      pts.push(A.clone().lerp(B, t).addScaledVector(dir, sag * 4 * t * (1 - t)))
+  // ---- the hanging cable ------------------------------------------------------------------------
+  // A ground cable is longer than the distance between its two ends and hangs under its own weight. Its shape is found
+  // by letting a chain of points settle under gravity (a small physics relaxation): the cable keeps its length, sags
+  // as low as the slack allows, resists sharp bends a little (it is heavy copper cable, not string), stays above the
+  // floor and is kept out of tall, thick parts such as the pole. A near-vertical run can only use up its slack by
+  // bowing out, so it swings away from the surfaces it is clamped to in a gentle loop.
+  let colliders = null // tall thick parts, in model space: {cx, cz, minY, maxY, samples: [[y, radius], ...]}
+  let floorY = 0
+
+  const buildColliders = () => {
+    colliders = []
+    const model = stage.modelGroup
+    model.updateWorldMatrix(true, true)
+    const inv = model.matrixWorld.clone().invert()
+    const v = new THREE.Vector3()
+    let lowest = Infinity
+    model.traverse((o) => {
+      if (!o.isMesh || o.userData.noPick || !o.geometry.attributes.position) return
+      const pos = o.geometry.attributes.position
+      const m = o.matrixWorld.clone().premultiply(inv) // part -> model space
+      const xs = []
+      const ys = []
+      const zs = []
+      let x0 = Infinity; let x1 = -Infinity; let y0 = Infinity; let y1 = -Infinity; let z0 = Infinity; let z1 = -Infinity
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i).applyMatrix4(m)
+        xs.push(v.x); ys.push(v.y); zs.push(v.z)
+        x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); z0 = Math.min(z0, v.z); z1 = Math.max(z1, v.z)
+      }
+      lowest = Math.min(lowest, y0)
+      const width = Math.max(x1 - x0, z1 - z0)
+      const height = y1 - y0
+      if (height < 3 * width || width < 0.03 * stage.radius) return // only tall, thick parts (a pole, a leg) are keep-out zones
+      const cx = (x0 + x1) / 2
+      const cz = (z0 + z1) / 2
+      const slices = 10
+      const rad = new Array(slices).fill(-1)
+      for (let i = 0; i < xs.length; i++) {
+        const s = Math.min(slices - 1, Math.floor(((ys[i] - y0) / height) * slices))
+        rad[s] = Math.max(rad[s], Math.hypot(xs[i] - cx, zs[i] - cz))
+      }
+      // slices without vertices (a pole is just a bottom ring and a top ring) are filled in by straight-line steps between the others
+      const samples = rad.map((r, s) => [y0 + ((s + 0.5) / slices) * height, r]).filter(sm => sm[1] >= 0)
+      colliders.push({cx, cz, minY: y0, maxY: y1, samples})
+    })
+    floorY = Number.isFinite(lowest) ? lowest : 0
+  }
+
+  const radiusAt = (c, y) => {
+    const s = c.samples
+    if (y <= s[0][0]) return s[0][1]
+    for (let i = 1; i < s.length; i++) {
+      if (y <= s[i][0]) { const t = (y - s[i - 1][0]) / ((s[i][0] - s[i - 1][0]) || 1); return s[i - 1][1] + (s[i][1] - s[i - 1][1]) * t }
     }
+    return s[s.length - 1][1]
+  }
+
+  // Returns a smooth curve through the settled chain. A, B: the two ends in model space. nA, nB: the direction each
+  // clamp points away from its surface (used to decide which way a near-vertical cable bows out).
+  const hangingCable = (A, B, nA, nB) => {
+    if (!colliders) buildColliders()
+    const N = cfg.CABLE_NODES
+    const chord = B.clone().sub(A)
+    const D = Math.max(chord.length(), 1e-6)
+    const L = D * (1 + cfg.CABLE_SLACK)
+    const seg = L / N
+    const down = new THREE.Vector3(0, -1, 0).transformDirection(stage.modelGroup.matrixWorld.clone().invert()).normalize()
+    // which way to bow when the cable is nearly vertical: away from the surfaces it is clamped to
+    const out = nA.clone().add(nB)
+    out.addScaledVector(down, -out.dot(down)) // sideways only
+    if (out.length() < 0.2) out.set(0, 0, 1).addScaledVector(down, -down.z)
+    out.normalize()
+    const vertical = Math.abs(chord.dot(down)) / D
+    const bowDir = down.clone().multiplyScalar(1 - vertical).addScaledVector(out, vertical).normalize()
+    const bulge = Math.sqrt(Math.max((3 * D * (L - D)) / 8, 0)) // how far a smooth arc of this length bows out
+    const margin = cfg.CABLE_RADIUS * stage.radius * 1.2 + 0.002 * stage.radius
+
+    const px = new Float64Array(N + 1)
+    const py = new Float64Array(N + 1)
+    const pz = new Float64Array(N + 1)
+    const qx = new Float64Array(N + 1)
+    const qy = new Float64Array(N + 1)
+    const qz = new Float64Array(N + 1)
+    for (let i = 0; i <= N; i++) {
+      const t = i / N
+      const k = bulge * 4 * t * (1 - t)
+      px[i] = A.x + chord.x * t + bowDir.x * k
+      py[i] = A.y + chord.y * t + bowDir.y * k
+      pz[i] = A.z + chord.z * t + bowDir.z * k
+      qx[i] = px[i]; qy[i] = py[i]; qz[i] = pz[i]
+    }
+    const grav = cfg.CABLE_GRAVITY * seg
+    const stiff = cfg.CABLE_STIFFNESS
+    const damp = 0.9
+    let calm = 0
+    for (let step = 0; step < cfg.CABLE_SETTLE_STEPS; step++) {
+      for (let i = 1; i < N; i++) { // move each free point: carry on, then gravity pulls it down
+        const vx = (px[i] - qx[i]) * damp
+        const vy = (py[i] - qy[i]) * damp
+        const vz = (pz[i] - qz[i]) * damp
+        qx[i] = px[i]; qy[i] = py[i]; qz[i] = pz[i]
+        px[i] += vx + down.x * grav
+        py[i] += vy + down.y * grav
+        pz[i] += vz + down.z * grav
+      }
+      for (let pass = 0; pass < 8; pass++) { // the cable cannot stretch or shrink: pull neighbours back to one segment apart
+        for (let i = 0; i < N; i++) {
+          const dx = px[i + 1] - px[i]
+          const dy = py[i + 1] - py[i]
+          const dz = pz[i + 1] - pz[i]
+          const d = Math.hypot(dx, dy, dz) || 1e-9
+          const f = (d - seg) / d
+          const wa = i === 0 ? 0 : (i + 1 === N ? 1 : 0.5) // the two ends are fixed to the clamps
+          const wb = i + 1 === N ? 0 : (i === 0 ? 1 : 0.5)
+          px[i] += dx * f * wa; py[i] += dy * f * wa; pz[i] += dz * f * wa
+          px[i + 1] -= dx * f * wb; py[i + 1] -= dy * f * wb; pz[i + 1] -= dz * f * wb
+        }
+      }
+      for (let i = 1; i < N; i++) { // stiffness: a heavy cable does not fold into a sharp kink
+        px[i] += ((px[i - 1] + px[i + 1]) / 2 - px[i]) * stiff
+        py[i] += ((py[i - 1] + py[i + 1]) / 2 - py[i]) * stiff
+        pz[i] += ((pz[i - 1] + pz[i + 1]) / 2 - pz[i]) * stiff
+      }
+      for (let i = 1; i < N; i++) { // keep it above the floor and out of the pole
+        let moved = false
+        if (py[i] < floorY + margin) { py[i] = floorY + margin; moved = true }
+        for (const c of colliders) {
+          if (py[i] < c.minY || py[i] > c.maxY) continue
+          const need = radiusAt(c, py[i]) + margin
+          let dx = px[i] - c.cx
+          let dz = pz[i] - c.cz
+          const d = Math.hypot(dx, dz)
+          if (d < need) {
+            if (d < 1e-6) { dx = out.x; dz = out.z } else { dx /= d; dz /= d }
+            px[i] = c.cx + dx * need; pz[i] = c.cz + dz * need; moved = true
+          }
+        }
+        if (moved) { qx[i] = px[i]; qy[i] = py[i]; qz[i] = pz[i] } // a part that was pushed does not keep its speed
+      }
+      // stop as soon as the cable has stopped moving (usually well before the step limit)
+      let still = 0
+      for (let i = 1; i < N; i++) still = Math.max(still, Math.abs(px[i] - qx[i]), Math.abs(py[i] - qy[i]), Math.abs(pz[i] - qz[i]))
+      calm = still < seg * 1e-4 ? calm + 1 : 0
+      if (calm >= 12) break
+    }
+    const pts = []
+    for (let i = 0; i <= N; i++) pts.push(new THREE.Vector3(px[i], py[i], pz[i]))
+    pts[0].copy(A)
+    pts[N].copy(B)
     return new THREE.CatmullRomCurve3(pts)
   }
 
@@ -268,7 +402,7 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
     const inv = model.matrixWorld.clone().invert()
     const nA = new THREE.Vector3(0, 0, 1).transformDirection(g.a.clamp.matrixWorld).transformDirection(inv)
     const nB = new THREE.Vector3(0, 0, 1).transformDirection(g.b.clamp.matrixWorld).transformDirection(inv)
-    const geo = new THREE.TubeGeometry(cableCurve(A, B, nA, nB), 56, cfg.CABLE_RADIUS * stage.radius, 8, false)
+    const geo = new THREE.TubeGeometry(hangingCable(A, B, nA, nB), 64, cfg.CABLE_RADIUS * stage.radius, 8, false)
     if (g.cable.geometry) g.cable.geometry.dispose()
     g.cable.geometry = geo
   }
