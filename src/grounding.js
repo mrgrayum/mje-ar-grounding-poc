@@ -1054,6 +1054,13 @@ export function createGrounding(stage, {model: modelInfo = {slug: 'model', title
 
   const api = {
     get enabled() { return enabled },
+    // Hides (or shows again) everything grounding has drawn on the model: clamps, cables, hardware. Used while the model
+    // animates into place, so nothing is left hanging in the air.
+    setHidden(on) {
+      grounds.forEach((g) => { g.cable.visible = !on; [g.a, g.b].forEach((e) => { if (e.kind === 'clamp') e.clamp.visible = !on }) })
+      fittings.forEach((f) => { f.group.visible = !on })
+      if (pending && pending.kind === 'clamp') pending.clamp.visible = !on
+    },
     setEnabled(on) {
       enabled = !!on
       if (!enabled) { closeRecord(); dropPending(); clearRequest(); nameMode = false; modeNote = '' }

@@ -9,6 +9,7 @@ import {libContext, addLibraryChrome} from './libchrome.js'
 import {createGrounding, createGroundUI} from './grounding.js'
 import {fingerprintOf} from './grounding-record.js'
 import {createPoseSmoother, createShakeMeter} from './smooth.js'
+import {createIntro} from './intro.js'
 
 // The engine's Three.js module reads THREE from the window.
 window.THREE = THREE
@@ -153,7 +154,9 @@ const onxrloaded = () => {
 
   const anchor = new THREE.Group() // position / yaw / scale chosen by the user
   const frame = new THREE.Group() // model-space origin (markers live in here)
-  anchor.add(frame)
+  const introGroup = new THREE.Group() // between the anchor and the model: the placement animation moves this, so it never fights the user's turning and resizing
+  anchor.add(introGroup)
+  introGroup.add(frame)
   anchor.visible = false
   const reticle = new THREE.Mesh(
     new THREE.RingGeometry(0.16, 0.22, 48).rotateX(-Math.PI / 2),
@@ -168,9 +171,19 @@ const onxrloaded = () => {
   const camera = {ref: null}
   // Calms the small shake of the model when the phone is held still (see smooth.js). Add &smooth=off|light|normal|strong|max to
   // the address to compare; &meter=1 shows frames per second and how much the camera shakes.
-  const smoother = createPoseSmoother(params.get('smooth') || 'strong')
+  const smoother = createPoseSmoother(params.get('smooth') || 'max')
   const meter = params.get('meter') ? createShakeMeter(document.body, smoother) : null
   window.__smoother = smoother // handy for debugging and tests
+  // How the model appears when it is placed: &intro=grow|drop|scan|assemble|off (see intro.js)
+  const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches
+  const intro = createIntro({
+    anchor,
+    group: introGroup,
+    frame,
+    kind: reduceMotion && !params.get('intro') ? 'off' : (params.get('intro') || 'grow'),
+    setHidden: on => { if (grounding && grounding.setHidden) grounding.setHidden(on) },
+  })
+  window.__intro = intro // handy for debugging and tests
 
   const moveBtn = document.createElement('button')
   moveBtn.className = 'mk-menu-btn'
@@ -203,6 +216,7 @@ const onxrloaded = () => {
   moveBtn.addEventListener('click', () => {
     if (window.XR8 && XR8.XrController && XR8.XrController.recenter) XR8.XrController.recenter()
     smoother.reset()
+    intro.cancel()
     setPlaced(false)
   })
   moveBtn.addEventListener('pointerdown', e => e.stopPropagation())
@@ -240,6 +254,7 @@ const onxrloaded = () => {
       window.__ar = {stage, tour} // handy for debugging and tests
 
       // Camera starts ~1.4 m above the floor; the floor is the y = 0 plane.
+      renderer.localClippingEnabled = true // the scan animation hides the part of the model above the glowing ring
       cam.position.set(0, 1.4, 0)
       XR8.XrController.updateCameraProjectionMatrix({origin: cam.position.clone(), facing: cam.quaternion.clone()})
 
@@ -283,6 +298,7 @@ const onxrloaded = () => {
         shadow.renderOrder = -1
         shadow.userData.noPick = true // taps on the ground shadow are not taps on the model
         frame.add(shadow)
+        intro.setModel({root: gltf.scene, box, size, longest})
         baseScale = data.arSize && data.arSize > 0 ? data.arSize / longest : 1
         anchor.scale.setScalar(baseScale)
         tour.motionLabels = data.labels || {}
@@ -358,6 +374,7 @@ const onxrloaded = () => {
           // face the model toward the viewer
           anchor.rotation.y = Math.atan2(cam.position.x - anchor.position.x, cam.position.z - anchor.position.z)
           setPlaced(true)
+          intro.play()
         }
       }
       canvas.addEventListener('pointerup', end)
@@ -384,6 +401,7 @@ const onxrloaded = () => {
         if (ok) reticle.position.copy(hit)
       }
       tickers.forEach(fn => fn(dt))
+      intro.update(dt)
     },
   }
 
