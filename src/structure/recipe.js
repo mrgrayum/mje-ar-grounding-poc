@@ -7,8 +7,8 @@
 //   {
 //     v: 2, structure: 'single-pole' | 'lattice', height,           feet, ground to the top of the pole or tower body
 //     armSpacing,                                                    feet between arms (grows if an insulator needs more room)
-//     right: [{len, dy, de}, ...], left: [...],                      one entry per arm, 0 to 6 arms per side. de: a dead end (the
-//                                                                    line stops here: two strain strings and a jumper). len: feet of arm
+//     right: [{len, dy, de}, ...], left: [...],                      one entry per arm, 0 to 6 arms per side. de: false, or a dead end
+//                                                                    ('both' | 'front' | 'back', see LINE_ENDS). len: feet of arm
 //                                                                    (a plain number also works). dy: feet to move the arm up (+)
 //                                                                    or down (-) from its default place; arm number i starts i
 //                                                                    spacings below the top, the same on both sides.
@@ -79,6 +79,16 @@ export const LIMITS = {
   guyAttach: [5, 100, 1],
 }
 export const MAX_GUYS = 4
+// What an arm does with the line. false: the wire runs through on an insulator. A dead end holds the wire on strain strings:
+// 'both' the line goes on both sides and a jumper joins them; 'front' / 'back' a terminal dead end, the line comes in from
+// that side only (front is the +Z side, the side of the down ground on a pole).
+export const LINE_ENDS = ['both', 'front', 'back']
+export const LINE_END_CHOICES = [
+  {id: '', label: 'Through (on an insulator)'},
+  {id: 'both', label: 'Dead end, line on both sides'},
+  {id: 'front', label: 'Terminal dead end, line on the front'},
+  {id: 'back', label: 'Terminal dead end, line on the back'},
+]
 
 export const DEFAULT_RECIPE = {
   v: 2,
@@ -109,7 +119,7 @@ function normalizeTopInsulator(i) {
 // an arm is {len, dy}; a plain number means a length with no up/down move
 const arm = (v) => {
   const o = v && typeof v === 'object' ? v : {len: v}
-  return {len: Math.round(clampTo(LIMITS.armLength, o.len, 6.5) * 4) / 4, dy: Math.round(clampTo(LIMITS.armShift, o.dy, 0) * 10) / 10, de: !!o.de}
+  return {len: Math.round(clampTo(LIMITS.armLength, o.len, 6.5) * 4) / 4, dy: Math.round(clampTo(LIMITS.armShift, o.dy, 0) * 10) / 10, de: LINE_ENDS.includes(o.de) ? o.de : (o.de === true ? 'both' : false)}
 }
 const arms = (list, fallback) => (Array.isArray(list) ? list : fallback).slice(0, LIMITS.arms[1]).map(arm)
 
@@ -170,7 +180,7 @@ export function layoutArms(recipeIn) {
   const spacing = Math.max(wanted, need)
   const hi = H - toTop
   const place = (a, i) => {
-    const lo = Math.min(hi, 0.6 + (a.de ? DEADEND_DROP : susp ? len : 0)) // keep the wire off the ground
+    const lo = Math.min(hi, 0.6 + (a.de ? Math.max(DEADEND_DROP, 1.3 * deadEndDip(recipe.insulator.bells)) : susp ? len : 0)) // keep the wire off the ground
     const raw = hi - i * spacing + a.dy * FT
     const y = Math.min(hi, Math.max(lo, raw))
     return {y, clamped: Math.abs(y - raw) > 1e-6}
@@ -247,7 +257,7 @@ export function buildStructure(recipeIn) {
       : makeSideArm(mats, {name, side, y, rootX: root, length: L})
     group.add(arm)
     if (a.de) {
-      phases.push({letter, x: arm.userData.endX - side * 0.1, z: 0, yA: y, deadEnd: true})
+      phases.push({letter, x: arm.userData.endX - side * 0.1, z: 0, yA: y, deadEnd: a.de})
       return
     }
     const inset = Math.min(0.25, L * 0.4)
@@ -287,11 +297,11 @@ export function buildStructure(recipeIn) {
   phases.forEach((p) => {
     if (p.deadEnd) {
       // two strain strings along the line, one wire (both spans and the jumper) named for the phase
-      group.add(makeDeadEndString(mats, {name: `Insulator${p.letter}_Front`, x: p.x, y: p.yA, side: 1, bells, kind: deadKind}))
-      group.add(makeDeadEndString(mats, {name: `Insulator${p.letter}_Back`, x: p.x, y: p.yA, side: -1, bells, kind: deadKind}))
+      if (p.deadEnd !== 'back') group.add(makeDeadEndString(mats, {name: `Insulator${p.letter}_Front`, x: p.x, y: p.yA, side: 1, bells, kind: deadKind}))
+      if (p.deadEnd !== 'front') group.add(makeDeadEndString(mats, {name: `Insulator${p.letter}_Back`, x: p.x, y: p.yA, side: -1, bells, kind: deadKind}))
       const name = `Phase${p.letter}_Conductor`
-      group.add(makeDeadEndConductor(mats, {name, x: p.x, y: p.yA, bells}))
-      conductors.push({name, letter: p.letter, x: p.x, y: p.yA - DEADEND_DROP})
+      group.add(makeDeadEndConductor(mats, {name, x: p.x, y: p.yA, bells, ends: p.deadEnd}))
+      conductors.push({name, letter: p.letter, x: p.x, y: p.yA - Math.max(DEADEND_DROP, 1.3 * deadEndDip(bells))})
       return
     }
     const insName = `Insulator${p.letter}`

@@ -8,7 +8,7 @@ import {createGrounding, createGroundUI} from './grounding.js'
 import {fingerprintOf} from './grounding-record.js'
 import {
   buildStructure, disposeStructure, normalizeRecipe, armLetters, layoutArms, DEFAULT_RECIPE, TYPE_DEFAULTS, PRESETS, STRUCTURES,
-  ARM_TYPES, INSULATORS, LIMITS, MAX_GUYS, STANDOFF_FT, FT,
+  ARM_TYPES, INSULATORS, LIMITS, MAX_GUYS, STANDOFF_FT, FT, LINE_END_CHOICES,
 } from './structure/recipe.js'
 
 const STORE = 'mje-structure-recipe-2'
@@ -60,6 +60,8 @@ const CSS = `
 .sb-guy h4 button{height:30px;padding:0 10px;border:2px solid #333;border-radius:8px;background:#161616;color:#fff;font:600 12px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer}
 .sb-add{width:100%;min-height:40px;border:2px dashed #555;border-radius:10px;background:none;color:#FFEF00;font:700 13px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer}
 .sb-arm h4 em{font-style:normal;font-weight:500;font-size:11.5px;color:#f1e96b}
+.sb-select{width:100%;height:38px;margin:4px 0;border:2px solid #333;border-radius:8px;background:#161616;color:#fff;font:600 13px 'Segoe UI',system-ui,Arial,sans-serif;padding:0 8px}
+.sb-select:focus{outline:0;border-color:#FFEF00}
 .sb-chips{display:flex;align-items:center;gap:6px;margin:4px 0 2px;font-size:12px;color:#9a9a9a}
 .sb-chips span{margin-right:2px}
 .sb-chips small{font-size:11px;margin-left:2px}
@@ -155,6 +157,14 @@ async function main() {
     update({[side]: arr})
   }
   const setArm = (side, i, patch, soon = true) => update({[side]: recipe[side].map((x, k) => (k === i ? {...x, ...patch} : x))}, soon)
+  // what the arm does with the line: through on an insulator, a dead end, or a terminal dead end
+  const lineEndSelect = (current, onPick) => {
+    const sel = el('select', 'sb-select', LINE_END_CHOICES.map(c => `<option value="${c.id}">${c.label}</option>`).join(''))
+    if (current === null) sel.insertAdjacentHTML('afterbegin', '<option value="__mixed" disabled hidden>Mixed (set on each arm)</option>')
+    sel.value = current === null ? '__mixed' : (current || '')
+    sel.addEventListener('change', () => onPick(sel.value || false))
+    return sel
+  }
   const levelCount = () => Math.min(LIMITS.arms[1], Math.max(3, recipe.right.length, recipe.left.length))
   // one box per arm: its length, how far it is moved up or down, and quick "put it at level N" buttons
   const armBox = (sec, side, i, letter) => {
@@ -180,10 +190,7 @@ async function main() {
     }
     syncers.push(show)
     show()
-    const de = el('label', 'sb-check', '<input type="checkbox"><span>Dead end (strings + jumper)</span>')
-    de.firstChild.checked = recipe[side][i].de
-    de.firstChild.addEventListener('change', e => setArm(side, i, {de: e.target.checked}, false))
-    box.appendChild(de)
+    box.appendChild(lineEndSelect(recipe[side][i].de, v => setArm(side, i, {de: v}, false)))
     numberRow(box, 'Length', 'ft', () => recipe[side][i].len, v => setArm(side, i, {len: v}), LIMITS.armLength)
     numberRow(box, 'Up / down', 'ft', () => recipe[side][i].dy, v => setArm(side, i, {dy: v}), LIMITS.armShift)
     box.appendChild(chips)
@@ -219,11 +226,12 @@ async function main() {
     const allArms = [...recipe.right, ...recipe.left]
     if (allArms.length) {
       s.appendChild(el('div', 'sb-sub', 'Line end'))
-      const row = el('label', 'sb-check', '<input type="checkbox"><span>Dead end on every arm</span>')
-      row.firstChild.checked = allArms.every(a => a.de)
-      row.firstChild.addEventListener('change', e => update({right: recipe.right.map(a => ({...a, de: e.target.checked})), left: recipe.left.map(a => ({...a, de: e.target.checked}))}))
-      s.appendChild(row)
-      s.appendChild(el('div', 'sb-soon', 'A dead end holds the wire on a strain string on each side of the arm, and a jumper hangs down between them. It is still one wire, one phase. The strings use the bell count under Insulators.'))
+      const same = allArms.every(a => a.de === allArms[0].de) ? allArms[0].de : null
+      const all = lineEndSelect(same, v => update({right: recipe.right.map(a => ({...a, de: v})), left: recipe.left.map(a => ({...a, de: v}))}))
+      all.title = 'Every arm'
+      s.appendChild(el('div', 'sb-soon', 'Every arm:'))
+      s.appendChild(all)
+      s.appendChild(el('div', 'sb-soon', 'A dead end holds the wire on a strain string. With the line on both sides, a jumper hangs down between the two strings. A terminal dead end has the line on one side only (front is the side of the down ground) and the wire is left as a tail hanging down on the structure side. Either way it is one wire, one phase. The strings use the bell count under Insulators.'))
     }
     if (allArms.length) s.appendChild(el('div', 'sb-sub', 'Each arm (the arm letter is its wire)'))
     recipe.right.forEach((_, i) => armBox(s, 'right', i, letters.right[i]))

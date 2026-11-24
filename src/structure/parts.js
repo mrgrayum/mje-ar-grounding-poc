@@ -191,7 +191,9 @@ export function makeDeadEndString(mats, {name, x, y, side, bells = 4, kind = 'gl
   return g
 }
 
-export function makeDeadEndConductor(mats, {name, x, y, bells = 4, halfSpan, radius = CONDUCTOR_RADIUS}) {
+// ends: 'both' (the line goes on both sides and a jumper joins them) or 'front' / 'back' (a terminal dead end: the line comes in
+// from that side only, and the wire is left as a tail hanging down on the structure side, ready to be taken to equipment).
+export function makeDeadEndConductor(mats, {name, x, y, bells = 4, halfSpan, radius = CONDUCTOR_RADIUS, ends = 'both'}) {
   const E = deadEndReach(bells)
   const far = halfSpan || E + 3.2
   const dip = deadEndDip(bells)
@@ -202,6 +204,17 @@ export function makeDeadEndConductor(mats, {name, x, y, bells = 4, halfSpan, rad
       pts.push(new THREE.Vector3(0, -DEADEND_DROP * (0.18 * t + 0.82 * t * t), dir * (E + t * (far - E))))
     }
     return cappedTube(pts, radius, 12, 28)
+  }
+  if (ends !== 'both') {
+    const dir = ends === 'front' ? 1 : -1
+    const tail = []
+    for (let i = 0; i <= 20; i++) {
+      const u = i / 20
+      tail.push(new THREE.Vector3(0, -dip * 1.3 * Math.pow(u, 1.2), dir * E * (1 - 0.3 * u)))
+    }
+    const m1 = named(name, mergeGeometries([span(dir), cappedTube(tail, radius, 12, 30)]), mats.aluminum)
+    m1.position.set(x, y, 0)
+    return m1
   }
   const jumper = []
   for (let i = 0; i <= 24; i++) {
