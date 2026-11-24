@@ -61,16 +61,26 @@ export function makePole(mats, pole) {
 }
 
 // ---- arms ---------------------------------------------------------------------------------------------------
-// A wood arm sticking out of the pole sideways: side = +1 (right, +X) or -1 (left, -X). It starts inside the pole so it
-// looks bolted on.
-export function makeSideArm(mats, pole, {name, side, y, length, height = 0.16, depth = 0.12}) {
-  const r = poleRadiusAt(pole, y)
-  const x0 = side * r * 0.6
-  const x1 = side * (r + length)
+// A wood arm sticking out of the pole sideways: side = +1 (right, +X) or -1 (left, -X). rootX is how far the pole's surface is
+// from the middle at that height. The arm starts inside the pole so it looks bolted on.
+export function makeSideArm(mats, {name, side, y, rootX, length, height = 0.16, depth = 0.12}) {
+  const x0 = side * rootX * 0.6
+  const x1 = side * (rootX + length)
   const g = new THREE.BoxGeometry(Math.abs(x1 - x0), height, depth)
   const m = named(name, g, mats.woodArm)
   m.position.set((x0 + x1) / 2, y, 0)
   m.userData.top = y + height / 2
+  m.userData.endX = x1
+  return m
+}
+
+// A very short arm (a "standoff"): a small steel bracket that holds a hanging insulator right beside the pole or tower.
+export function makeStandoffBracket(mats, {name, side, y, rootX, reach = 0.3}) {
+  const x0 = side * rootX * 0.9
+  const x1 = side * (rootX + reach)
+  const m = named(name, new THREE.BoxGeometry(Math.abs(x1 - x0), 0.1, 0.1), mats.steel)
+  m.position.set((x0 + x1) / 2, y, 0)
+  m.userData.top = y + 0.05
   m.userData.endX = x1
   return m
 }
@@ -119,11 +129,13 @@ function polymerRod(bells) {
 // ---- pin insulator ------------------------------------------------------------------------------------------------
 // Stands on top of an arm (or the pole top), with the wire resting in its top groove. Base at (x, y, z), 0.30 m tall.
 export const PIN_HEIGHT = 0.3
-export function makePinInsulator(mats, {name, x, y, z = 0, kind = 'porcelain'}) {
+// side: 0 stands upright; +1 or -1 lies on its side pointing out of the pole to the right or left (a standoff insulator).
+export function makePinInsulator(mats, {name, x, y, z = 0, kind = 'porcelain', side = 0}) {
   const prof = [[0.03, 0], [0.03, 0.06], [0.065, 0.06], [0.065, 0.1], [0.04, 0.12], [0.04, 0.17], [0.06, 0.17], [0.06, 0.21],
     [0.035, 0.23], [0.035, 0.27], [0.045, 0.28], [0.045, 0.3]].map(([r, h]) => new THREE.Vector2(r, h))
   const m = named(name, new THREE.LatheGeometry(prof, 16), kind === 'polymer' ? mats.polymer : mats.porcelain)
   m.position.set(x, y, z)
+  if (side) m.rotation.z = -side * Math.PI / 2
   return m
 }
 
@@ -181,13 +193,86 @@ export function makeStaticWire(mats, pole, {mastHeight = 0.9, halfSpan = 4, droo
   return [mast, wire]
 }
 
-// A guy wire from the pole to an anchor in the ground, leaning out the -Z side (the down ground is on +Z).
-export function makeGuy(mats, pole, {attachY, reach}) {
+// A guy wire from the pole to an anchor in the ground. angle: the direction it leans, in degrees around the pole
+// (0 = along the line toward +Z, 90 = toward +X, 180 = toward -Z, 270 = toward -X). The down ground is on the +Z side.
+export function makeGuy(mats, pole, {index, angle, attachY, reach}) {
   const r = poleRadiusAt(pole, attachY)
-  const a = new THREE.Vector3(0, attachY, -r)
-  const b = new THREE.Vector3(0, 0.25, -reach)
-  const wire = named('GuyWire', cappedTube([a, b], 0.025, 8, 8), mats.steel)
-  const anchor = named('GuyAnchor', new THREE.BoxGeometry(0.5, 0.3, 0.5).translate(0, 0.0, -reach), mats.concrete)
-  const clamp = named('GuyAttachment', new THREE.CylinderGeometry(r + 0.04, r + 0.04, 0.08, 20).translate(0, attachY, 0), mats.steel)
+  const dir = new THREE.Vector3(Math.sin((angle * Math.PI) / 180), 0, Math.cos((angle * Math.PI) / 180))
+  const a = dir.clone().multiplyScalar(r).setY(attachY)
+  const b = dir.clone().multiplyScalar(reach).setY(0.25)
+  const wire = named(`GuyWire_${index}`, cappedTube([a, b], 0.025, 8, 8), mats.steel)
+  const anchor = named(`GuyAnchor_${index}`, new THREE.BoxGeometry(0.5, 0.3, 0.5).rotateY((angle * Math.PI) / 180).translate(b.x, 0, b.z), mats.concrete)
+  const clamp = named(`GuyAttachment_${index}`, new THREE.CylinderGeometry(r + 0.04, r + 0.04, 0.08, 20).translate(0, attachY, 0), mats.steel)
   return [wire, anchor, clamp]
+}
+
+// ---- steel lattice ----------------------------------------------------------------------------------------------
+// A thin steel member between two points (a plain round bar stands in for an angle iron).
+const AXIS = new THREE.Vector3(0, 1, 0)
+function strut(a, b, radius) {
+  const dir = new THREE.Vector3().subVectors(b, a)
+  const g = new THREE.CylinderGeometry(radius, radius, dir.length(), 6, 1)
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(AXIS, dir.clone().normalize()))
+  const mid = new THREE.Vector3().addVectors(a, b).multiplyScalar(0.5)
+  return g.translate(mid.x, mid.y, mid.z)
+}
+const V = (x, y, z) => new THREE.Vector3(x, y, z)
+
+// A four-legged, self-supporting lattice tower: legs that lean in toward the top, level belts and X bracing on all four faces.
+// Returns {meshes, sideAt(y)}: sideAt = how far the outside of the legs is from the middle at height y.
+export function makeLatticeTower(mats, {height}) {
+  const baseW = Math.max(2.2, height * 0.17)
+  const topW = Math.max(1.1, height * 0.05)
+  const half = y => (baseW + (topW - baseW) * (y / height)) / 2
+  const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]]
+  const at = (k, y) => V(corners[k][0] * half(y), y, corners[k][1] * half(y))
+  const meshes = []
+  for (let k = 0; k < 4; k++) meshes.push(named(`TowerLeg_${k + 1}`, strut(at(k, 0), at(k, height), 0.08), mats.steel))
+  const panels = Math.max(3, Math.round(height / 2.8))
+  const bars = []
+  for (let i = 0; i <= panels; i++) {
+    const y = (i * height) / panels
+    for (let k = 0; k < 4; k++) {
+      const n = (k + 1) % 4
+      bars.push(strut(at(k, y), at(n, y), 0.035)) // level belt
+      if (i < panels) {
+        const y2 = ((i + 1) * height) / panels
+        bars.push(strut(at(k, y), at(n, y2), 0.03), strut(at(n, y), at(k, y2), 0.03)) // X bracing
+      }
+    }
+  }
+  meshes.push(named('TowerBracing', mergeGeometries(bars), mats.steel))
+  return {meshes, sideAt: y => half(y) + 0.08}
+}
+
+// A lattice arm: two flat trusses side by side (a bottom chord, a sloping top chord, uprights and diagonals) with cross bars.
+export function makeTrussArm(mats, {name, side, y, rootX, length}) {
+  const x0 = rootX - 0.1
+  const x1 = rootX + length
+  const d0 = 0.55 // depth at the tower
+  const d1 = 0.14 // depth at the tip
+  const topAt = x => y + d0 + (d1 - d0) * ((x - x0) / Math.max(x1 - x0, 1e-6))
+  const n = Math.max(1, Math.round((x1 - x0) / 0.6))
+  const bars = []
+  const r = 0.028
+  const zs = [-0.11, 0.11]
+  zs.forEach((z) => {
+    bars.push(strut(V(side * x0, y, z), V(side * x1, y, z), r), strut(V(side * x0, topAt(x0), z), V(side * x1, topAt(x1), z), r))
+    for (let i = 0; i <= n; i++) {
+      const xi = x0 + ((x1 - x0) * i) / n
+      bars.push(strut(V(side * xi, y, z), V(side * xi, topAt(xi), z), r * 0.8))
+      if (i < n) {
+        const xn = x0 + ((x1 - x0) * (i + 1)) / n
+        bars.push(strut(V(side * xi, y, z), V(side * xn, topAt(xn), z), r * 0.8))
+      }
+    }
+  })
+  for (let i = 0; i <= n; i++) {
+    const xi = x0 + ((x1 - x0) * i) / n
+    bars.push(strut(V(side * xi, y, zs[0]), V(side * xi, y, zs[1]), r * 0.8), strut(V(side * xi, topAt(xi), zs[0]), V(side * xi, topAt(xi), zs[1]), r * 0.8))
+  }
+  const m = named(name, mergeGeometries(bars), mats.steel)
+  m.userData.top = topAt(x1) + r
+  m.userData.endX = side * x1
+  return m
 }

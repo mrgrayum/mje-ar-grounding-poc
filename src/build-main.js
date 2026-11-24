@@ -7,10 +7,11 @@ import {createStage, injectStyles, lockZoom} from './core.js'
 import {createGrounding, createGroundUI} from './grounding.js'
 import {fingerprintOf} from './grounding-record.js'
 import {
-  buildStructure, disposeStructure, normalizeRecipe, DEFAULT_RECIPE, STRUCTURES, ARM_TYPES, LAYOUTS, INSULATORS, LIMITS,
+  buildStructure, disposeStructure, normalizeRecipe, armLetters, DEFAULT_RECIPE, TYPE_DEFAULTS, PRESETS, STRUCTURES, ARM_TYPES,
+  INSULATORS, LIMITS, MAX_GUYS, STANDOFF_FT,
 } from './structure/recipe.js'
 
-const STORE = 'mje-structure-recipe'
+const STORE = 'mje-structure-recipe-2'
 const CSS = `
 .sb *{box-sizing:border-box}
 .sb-panel{position:absolute;z-index:20;left:0;top:0;bottom:0;width:min(360px,100%);display:flex;flex-direction:column;background:#0b0b0b;color:#fff;
@@ -48,6 +49,17 @@ const CSS = `
   background:#000;color:#FFEF00;font:700 14px 'Segoe UI',system-ui,Arial,sans-serif;border:2px solid #FFEF00;cursor:pointer;pointer-events:auto}
 .sb-panel[hidden],.sb-back[hidden]{display:none}
 .sb-fold{display:none}
+.sb-step{display:flex;align-items:center;gap:8px;margin:7px 0}
+.sb-step label{flex:1;font-size:13px;color:#ddd}
+.sb-step button{width:40px;height:36px;border:2px solid #333;border-radius:10px;background:#161616;color:#FFEF00;font:700 20px/1 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer}
+.sb-step b{width:26px;text-align:center;font-size:16px}
+.sb-armrow label{flex:0 0 86px;font-size:12.5px}
+.sb-armrow em{font-style:normal;font-size:10.5px;color:#f1e96b;width:46px}
+.sb-guy{margin:8px 0;padding:8px 10px;border:2px solid #2a2a2a;border-radius:10px}
+.sb-guy h4{margin:0 0 4px;display:flex;justify-content:space-between;align-items:center;font-size:13px}
+.sb-guy h4 button{height:30px;padding:0 10px;border:2px solid #333;border-radius:8px;background:#161616;color:#fff;font:600 12px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer}
+.sb-add{width:100%;min-height:40px;border:2px dashed #555;border-radius:10px;background:none;color:#FFEF00;font:700 13px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer}
+.sb-sub{margin:10px 0 2px;font:700 11px 'Segoe UI',system-ui,Arial,sans-serif;color:#aaa;letter-spacing:.08em;text-transform:uppercase}
 @media(max-width:700px){
   .sb-panel{top:auto;width:100%;height:min(54vh,520px);border-right:0;border-top:3px solid #FFEF00}
   .sb-panel.folded{height:auto}.sb-panel.folded .sb-scroll,.sb-panel.folded .sb-foot{display:none}
@@ -106,42 +118,109 @@ async function main() {
     sec.appendChild(wrap)
     return wrap
   }
-  const numberRow = (sec, label, key, unit, get, set, [min, max, step]) => {
-    const row = el('div', 'sb-row', `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}"><span>${unit}</span>`)
+  let syncers = []
+  // a slider and a typed number that always show the same value; get/set talk to the recipe
+  const numberRow = (sec, label, unit, get, set, [min, max, step], cls = '', tag = null) => {
+    const row = el('div', `sb-row ${cls}`, `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step < 1 ? step : 1}"><span>${unit}</span>${tag ? '<em></em>' : ''}`)
     const [range, num] = row.querySelectorAll('input')
-    range.value = num.value = get()
-    range.addEventListener('input', () => { num.value = range.value; set(+range.value) })
-    num.addEventListener('change', () => { set(+num.value); range.value = num.value = get() })
+    const em = row.querySelector('em')
+    const sync = () => { range.value = num.value = get(); if (em) em.textContent = tag(get()) }
+    range.addEventListener('input', () => { set(+range.value, true) })
+    num.addEventListener('change', () => { set(+num.value, true) })
+    syncers.push(sync)
+    sync()
     sec.appendChild(row)
   }
+  const stepper = (sec, label, get, set, [min, max]) => {
+    const row = el('div', 'sb-step', `<label>${label}</label><button type="button">&minus;</button><b></b><button type="button">+</button>`)
+    const [minus, plus] = row.querySelectorAll('button')
+    row.querySelector('b').textContent = get()
+    minus.addEventListener('click', () => get() > min && set(get() - 1))
+    plus.addEventListener('click', () => get() < max && set(get() + 1))
+    sec.appendChild(row)
+  }
+  const setArms = (side, n) => {
+    const cur = recipe[side]
+    const other = recipe[side === 'right' ? 'left' : 'right']
+    const fill = cur.length ? cur[cur.length - 1] : (other.length ? other[other.length - 1] : TYPE_DEFAULTS[recipe.structure].right[0])
+    const arr = cur.slice(0, n)
+    while (arr.length < n) arr.push(fill)
+    update({[side]: arr})
+  }
+  const setArmLength = (side, i, v) => update({[side]: recipe[side].map((x, k) => (k === i ? v : x))}, true)
+  const setGuy = (i, patch) => update({guys: recipe.guys.map((g, k) => (k === i ? {...g, ...patch} : g))}, true)
 
   const render = () => {
     const keepScroll = scroll.scrollTop
     scroll.innerHTML = ''
+    syncers = []
+    const lattice = recipe.structure === 'lattice'
     let s = section('1 &middot; Structure type')
-    cards(s, 'structure', STRUCTURES, recipe.structure, () => {})
+    cards(s, 'structure', STRUCTURES, recipe.structure, id => update({structure: id, ...TYPE_DEFAULTS[id], guys: [], topPhase: false}))
     s = section('2 &middot; Arm type')
-    cards(s, 'arm', ARM_TYPES, recipe.armType, () => {})
-    s = section('3 &middot; Phase layout')
-    cards(s, 'layout', LAYOUTS, recipe.layout, id => update({layout: id, armLength: LAYOUTS.find(l => l.id === id).armLength}))
+    cards(s, 'arm', ARM_TYPES, ARM_TYPES.find(a => a.for === recipe.structure).id, () => {})
+    s = section('3 &middot; Arms')
+    s.appendChild(el('div', 'sb-sub', 'Quick layouts'))
+    cards(s, 'preset', PRESETS[recipe.structure].map((p, i) => ({id: String(i), label: p.label})), '', (id) => {
+      const p = PRESETS[recipe.structure][+id]
+      update({right: p.right, left: p.left, topPhase: p.topPhase})
+    })
+    s.appendChild(el('div', 'sb-sub', 'How many arms'))
+    stepper(s, 'Right side', () => recipe.right.length, n => setArms('right', n), LIMITS.arms)
+    stepper(s, 'Left side', () => recipe.left.length, n => setArms('left', n), LIMITS.arms)
+    if (!lattice) {
+      const row = el('label', 'sb-check', '<input type="checkbox"><span>Phase on top of the pole</span>')
+      row.firstChild.checked = recipe.topPhase
+      row.firstChild.addEventListener('change', e => update({topPhase: e.target.checked}))
+      s.appendChild(row)
+    }
+    const letters = armLetters(recipe)
+    if (recipe.right.length + recipe.left.length > 1) {
+      s.appendChild(el('div', 'sb-sub', 'Length of every arm'))
+      numberRow(s, 'All arms', 'ft', () => (recipe.right.length ? recipe.right[0] : recipe.left[0]), v => update({right: recipe.right.map(() => v), left: recipe.left.map(() => v)}, true), LIMITS.armLength)
+    }
+    const standTag = v => (v < STANDOFF_FT ? 'standoff' : '')
+    if (recipe.right.length || recipe.left.length) s.appendChild(el('div', 'sb-sub', 'Each arm (the arm letter is its wire)'))
+    recipe.right.forEach((_, i) => numberRow(s, `Arm ${letters.right[i]} &middot; right`, 'ft', () => recipe.right[i], v => setArmLength('right', i, v), LIMITS.armLength, 'sb-armrow', standTag))
+    recipe.left.forEach((_, i) => numberRow(s, `Arm ${letters.left[i]} &middot; left`, 'ft', () => recipe.left[i], v => setArmLength('left', i, v), LIMITS.armLength, 'sb-armrow', standTag))
+    s.appendChild(el('div', 'sb-soon', `Under ${STANDOFF_FT * 12} in an arm becomes a standoff: the insulator is mounted straight on the ${lattice ? 'tower' : 'pole'}.`))
     s = section('4 &middot; Size')
-    numberRow(s, 'Pole height', 'height', 'm', () => recipe.height, v => update({height: v}, true), LIMITS.height)
-    numberRow(s, recipe.layout === 'crossarm' ? 'Crossarm reach' : 'Arm length', 'armLength', 'm', () => recipe.armLength, v => update({armLength: v}, true), LIMITS.armLength)
-    if (recipe.layout !== 'crossarm') numberRow(s, 'Arm spacing', 'armSpacing', 'm', () => recipe.armSpacing, v => update({armSpacing: v}, true), LIMITS.armSpacing)
+    numberRow(s, lattice ? 'Tower height' : 'Pole height', 'ft', () => recipe.height, v => update({height: v}, true), LIMITS.height)
+    if (recipe.right.length > 1 || recipe.left.length > 1) numberRow(s, 'Arm spacing', 'ft', () => recipe.armSpacing, v => update({armSpacing: v}, true), LIMITS.armSpacing)
     s = section('5 &middot; Insulators')
     cards(s, 'ins', INSULATORS, recipe.insulator.type, id => update({insulator: {...recipe.insulator, type: id}}))
     const type = INSULATORS.find(t => t.id === recipe.insulator.type)
     cards(s, 'mat', type.materials.map(m => ({id: m, label: cap(m)})), recipe.insulator.material, m => update({insulator: {...recipe.insulator, material: m}})).style.marginTop = '8px'
-    if (type.bells) numberRow(s, 'Bells', 'bells', '', () => recipe.insulator.bells, v => update({insulator: {...recipe.insulator, bells: v}}, true), LIMITS.bells)
+    if (type.bells) numberRow(s, 'Bells', '', () => recipe.insulator.bells, v => update({insulator: {...recipe.insulator, bells: v}}, true), LIMITS.bells)
     s = section('6 &middot; Details')
-    ;[['downGround', 'Down ground (pole ground)'], ['staticWire', 'Static (shield) wire'], ['guyWire', 'Guy wire and anchor']].forEach(([k, label]) => {
+    const checks = [['staticWire', 'Static (shield) wire']]
+    if (!lattice) checks.unshift(['downGround', 'Down ground (pole ground)'])
+    checks.forEach(([k, label]) => {
       const row = el('label', 'sb-check', `<input type="checkbox"><span>${label}</span>`)
       const box = row.firstChild
       box.checked = !!recipe.details[k]
       box.addEventListener('change', () => update({details: {...recipe.details, [k]: box.checked}}))
       s.appendChild(row)
     })
-    s.appendChild(el('div', 'sb-soon', 'More on the way: dead-end hardware, arrestors, switches, transformers, anchors and more.'))
+    if (!lattice) {
+      s.appendChild(el('div', 'sb-sub', 'Guy wires'))
+      recipe.guys.forEach((g, i) => {
+        const box = el('div', 'sb-guy', `<h4><span>Guy ${i + 1}</span><button type="button">Remove</button></h4>`)
+        box.querySelector('button').addEventListener('click', () => update({guys: recipe.guys.filter((_, k) => k !== i)}))
+        numberRow(box, 'Direction', '&deg;', () => recipe.guys[i].angle, v => setGuy(i, {angle: v}), LIMITS.guyAngle)
+        numberRow(box, 'Anchor out', 'ft', () => recipe.guys[i].reach, v => setGuy(i, {reach: v}), LIMITS.guyReach)
+        numberRow(box, 'Attached at', 'ft', () => recipe.guys[i].attach, v => setGuy(i, {attach: v}), LIMITS.guyAttach)
+        s.appendChild(box)
+      })
+      if (recipe.guys.length < MAX_GUYS) {
+        const add = el('button', 'sb-add', '+ Add a guy wire and anchor')
+        add.type = 'button'
+        add.addEventListener('click', () => update({guys: [...recipe.guys, {angle: [180, 90, 270, 0][recipe.guys.length], reach: 25, attach: Math.min(30, recipe.height - 3)}]}))
+        s.appendChild(add)
+      }
+      s.appendChild(el('div', 'sb-soon', 'Direction: 0&deg; runs along the line on the side of the down ground, 90&deg; toward the right arms, 180&deg; the other way along the line, 270&deg; toward the left arms.'))
+    }
+    s.appendChild(el('div', 'sb-soon', 'More on the way: dead-end hardware, arrestors, switches, transformers and more.'))
     const notes = el('div'); notes.className = 'sb-notes'; scroll.appendChild(notes)
     showNotes()
     scroll.scrollTop = keepScroll
@@ -172,7 +251,7 @@ async function main() {
     try { localStorage.setItem(STORE, JSON.stringify(recipe)) } catch (e) { /* not saved, still works */ }
     clearTimeout(timer)
     timer = setTimeout(rebuild, soon ? 90 : 0)
-    if (!soon) render()
+    if (!soon) render(); else syncers.forEach(f => f())
   }
 
   // ---- ground mode ------------------------------------------------------------------------------------------
