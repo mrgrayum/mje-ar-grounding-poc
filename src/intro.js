@@ -4,6 +4,8 @@
 //   scan      a glowing yellow ring sweeps up the model from the floor and the model exists only below it
 //   assemble  the parts fly in one after another (lowest first), popping into place
 //   off       no animation
+// Which one a model uses is its own setting ("intro" in markers.json, chosen in the authoring app); &intro= in the address
+// overrides it for testing. A model with no setting appears without animation, as before.
 // Every style also sends a yellow ripple across the floor from the tapped spot. It plays when the model is placed (and again
 // after "Move model"), takes about a second, and puts every transform and material back exactly as it was when it is done.
 import * as THREE from 'three'
@@ -19,7 +21,7 @@ const easeOutBack = (t, k = 1.4) => 1 + (k + 1) * (t - 1) ** 3 + k * (t - 1) ** 
 // animation never fights the user's own turning and resizing. frame: the model's own space. renderer: for clipping (scan).
 // setHidden(on): hides or shows what grounding has drawn on the model.
 export function createIntro({anchor, group, frame, renderer, kind = 'grow', setHidden = () => {}}) {
-  const style = INTRO_KINDS.includes(kind) ? kind : 'grow'
+  let style = INTRO_KINDS.includes(kind) ? kind : 'off'
   let model = null // {root, box, size, longest}
   let run = null // what is playing now
   const ripples = []
@@ -133,6 +135,8 @@ export function createIntro({anchor, group, frame, renderer, kind = 'grow', setH
 
   return {
     get kind() { return style },
+    // Chooses the style (from the model's own setting, once its data has loaded).
+    setKind(k) { style = INTRO_KINDS.includes(k) ? k : 'off' },
     get running() { return !!run },
     setModel(m) { model = m },
     // Starts the animation (call right after the model has been placed and made visible).

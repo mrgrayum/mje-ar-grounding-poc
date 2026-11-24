@@ -3,6 +3,7 @@
   "title": "Test Pole Structure",
   "mode": "ar",
   "grounding": true,
+  "intro": "scan",
   "model": "model.glb",
   "markers": [],
   "arSize": 2

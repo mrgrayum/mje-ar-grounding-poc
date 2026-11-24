@@ -174,13 +174,13 @@ const onxrloaded = () => {
   const smoother = createPoseSmoother(params.get('smooth') || 'max')
   const meter = params.get('meter') ? createShakeMeter(document.body, smoother) : null
   window.__smoother = smoother // handy for debugging and tests
-  // How the model appears when it is placed: &intro=grow|drop|scan|assemble|off (see intro.js)
+  // How the model appears when it is placed: the model's "intro" setting, or &intro=grow|drop|scan|assemble|off (see intro.js)
   const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches
   const intro = createIntro({
     anchor,
     group: introGroup,
     frame,
-    kind: reduceMotion && !params.get('intro') ? 'off' : (params.get('intro') || 'grow'),
+    kind: params.get('intro') || 'off', // the model's own setting is applied once its data has loaded
     setHidden: on => { if (grounding && grounding.setHidden) grounding.setHidden(on) },
   })
   window.__intro = intro // handy for debugging and tests
@@ -299,6 +299,7 @@ const onxrloaded = () => {
         shadow.userData.noPick = true // taps on the ground shadow are not taps on the model
         frame.add(shadow)
         intro.setModel({root: gltf.scene, box, size, longest})
+        if (!params.get('intro')) intro.setKind(reduceMotion ? 'off' : data.intro) // a phone set to reduce motion gets none
         baseScale = data.arSize && data.arSize > 0 ? data.arSize / longest : 1
         anchor.scale.setScalar(baseScale)
         tour.motionLabels = data.labels || {}
