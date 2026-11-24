@@ -25,6 +25,7 @@ const targets = {
   'viewer.js': 'src/viewer-main.js',
   'ar.js': 'src/ar-main.js',
   'library.js': 'src/library-main.js',
+  'build.js': 'src/build-main.js',
 }
 
 let allSame = true
