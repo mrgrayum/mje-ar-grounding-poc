@@ -7,8 +7,8 @@ import {createStage, injectStyles, lockZoom} from './core.js'
 import {createGrounding, createGroundUI} from './grounding.js'
 import {fingerprintOf} from './grounding-record.js'
 import {
-  buildStructure, disposeStructure, normalizeRecipe, armLetters, DEFAULT_RECIPE, TYPE_DEFAULTS, PRESETS, STRUCTURES, ARM_TYPES,
-  INSULATORS, LIMITS, MAX_GUYS, STANDOFF_FT,
+  buildStructure, disposeStructure, normalizeRecipe, armLetters, layoutArms, DEFAULT_RECIPE, TYPE_DEFAULTS, PRESETS, STRUCTURES,
+  ARM_TYPES, INSULATORS, LIMITS, MAX_GUYS, STANDOFF_FT, FT,
 } from './structure/recipe.js'
 
 const STORE = 'mje-structure-recipe-2'
@@ -59,6 +59,12 @@ const CSS = `
 .sb-guy h4{margin:0 0 4px;display:flex;justify-content:space-between;align-items:center;font-size:13px}
 .sb-guy h4 button{height:30px;padding:0 10px;border:2px solid #333;border-radius:8px;background:#161616;color:#fff;font:600 12px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer}
 .sb-add{width:100%;min-height:40px;border:2px dashed #555;border-radius:10px;background:none;color:#FFEF00;font:700 13px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer}
+.sb-arm h4 em{font-style:normal;font-weight:500;font-size:11.5px;color:#f1e96b}
+.sb-chips{display:flex;align-items:center;gap:6px;margin:4px 0 2px;font-size:12px;color:#9a9a9a}
+.sb-chips span{margin-right:2px}
+.sb-chips small{font-size:11px;margin-left:2px}
+.sb-chips button{min-width:38px;height:34px;border:2px solid #333;border-radius:8px;background:#161616;color:#fff;font:700 13px 'Segoe UI',system-ui,Arial,sans-serif;cursor:pointer}
+.sb-chips button.on{border-color:#FFEF00;color:#FFEF00;background:#2a2800}
 .sb-sub{margin:10px 0 2px;font:700 11px 'Segoe UI',system-ui,Arial,sans-serif;color:#aaa;letter-spacing:.08em;text-transform:uppercase}
 @media(max-width:700px){
   .sb-panel{top:auto;width:100%;height:min(54vh,520px);border-right:0;border-top:3px solid #FFEF00}
@@ -142,12 +148,43 @@ async function main() {
   const setArms = (side, n) => {
     const cur = recipe[side]
     const other = recipe[side === 'right' ? 'left' : 'right']
-    const fill = cur.length ? cur[cur.length - 1] : (other.length ? other[other.length - 1] : TYPE_DEFAULTS[recipe.structure].right[0])
+    const last = cur.length ? cur[cur.length - 1] : (other.length ? other[other.length - 1] : null)
+    const fill = {len: last ? last.len : TYPE_DEFAULTS[recipe.structure].right[0], dy: 0} // a new arm: same length, default place
     const arr = cur.slice(0, n)
     while (arr.length < n) arr.push(fill)
     update({[side]: arr})
   }
-  const setArmLength = (side, i, v) => update({[side]: recipe[side].map((x, k) => (k === i ? v : x))}, true)
+  const setArm = (side, i, patch, soon = true) => update({[side]: recipe[side].map((x, k) => (k === i ? {...x, ...patch} : x))}, soon)
+  const levelCount = () => Math.min(LIMITS.arms[1], Math.max(3, recipe.right.length, recipe.left.length))
+  // one box per arm: its length, how far it is moved up or down, and quick "put it at level N" buttons
+  const armBox = (sec, side, i, letter) => {
+    const box = el('div', 'sb-guy sb-arm', `<h4><span>Arm ${letter} &middot; ${side}</span><em></em></h4>`)
+    const em = box.querySelector('em')
+    const chips = el('div', 'sb-chips', '<span>Put at level</span>')
+    const buttons = []
+    for (let k = 0; k < levelCount(); k++) {
+      const b = el('button', '', String(k + 1))
+      b.type = 'button'
+      b.title = k === 0 ? 'Top arm position' : `Same height as arm number ${k + 1} on the other side`
+      b.addEventListener('click', () => setArm(side, i, {dy: Math.round(((i - k) * layoutArms(recipe).spacing / FT) * 10) / 10}, false))
+      chips.appendChild(b)
+      buttons.push(b)
+    }
+    chips.appendChild(el('small', '', '1 = top'))
+    const show = () => {
+      const a = recipe[side][i]
+      if (!a) return
+      const lay = layoutArms(recipe)
+      em.textContent = `${a.len < STANDOFF_FT ? 'standoff, ' : ''}at ${(lay[side][i].y / FT).toFixed(1)} ft`
+      buttons.forEach((b, k) => b.classList.toggle('on', Math.abs(lay[side][i].y - lay.slot(k)) < 0.06))
+    }
+    syncers.push(show)
+    show()
+    numberRow(box, 'Length', 'ft', () => recipe[side][i].len, v => setArm(side, i, {len: v}), LIMITS.armLength)
+    numberRow(box, 'Up / down', 'ft', () => recipe[side][i].dy, v => setArm(side, i, {dy: v}), LIMITS.armShift)
+    box.appendChild(chips)
+    sec.appendChild(box)
+  }
   const setGuy = (i, patch) => update({guys: recipe.guys.map((g, k) => (k === i ? {...g, ...patch} : g))}, true)
 
   const render = () => {
@@ -155,11 +192,13 @@ async function main() {
     scroll.innerHTML = ''
     syncers = []
     const lattice = recipe.structure === 'lattice'
-    let s = section('1 &middot; Structure type')
+    let n = 0
+    const sec = title => section(`${++n} &middot; ${title}`)
+    let s = sec('Structure type')
     cards(s, 'structure', STRUCTURES, recipe.structure, id => update({structure: id, ...TYPE_DEFAULTS[id], guys: [], topPhase: false}))
-    s = section('2 &middot; Arm type')
+    s = sec('Arm type')
     cards(s, 'arm', ARM_TYPES, ARM_TYPES.find(a => a.for === recipe.structure).id, () => {})
-    s = section('3 &middot; Arms')
+    s = sec('Arms')
     s.appendChild(el('div', 'sb-sub', 'Quick layouts'))
     cards(s, 'preset', PRESETS[recipe.structure].map((p, i) => ({id: String(i), label: p.label})), '', (id) => {
       const p = PRESETS[recipe.structure][+id]
@@ -168,31 +207,44 @@ async function main() {
     s.appendChild(el('div', 'sb-sub', 'How many arms'))
     stepper(s, 'Right side', () => recipe.right.length, n => setArms('right', n), LIMITS.arms)
     stepper(s, 'Left side', () => recipe.left.length, n => setArms('left', n), LIMITS.arms)
+    const letters = armLetters(recipe)
+    if (recipe.right.length + recipe.left.length > 1) {
+      s.appendChild(el('div', 'sb-sub', 'Length of every arm'))
+      numberRow(s, 'All arms', 'ft', () => (recipe.right.length ? recipe.right[0].len : recipe.left[0].len), v => update({right: recipe.right.map(a => ({...a, len: v})), left: recipe.left.map(a => ({...a, len: v}))}, true), LIMITS.armLength)
+    }
+    if (recipe.right.length || recipe.left.length) s.appendChild(el('div', 'sb-sub', 'Each arm (the arm letter is its wire)'))
+    recipe.right.forEach((_, i) => armBox(s, 'right', i, letters.right[i]))
+    recipe.left.forEach((_, i) => armBox(s, 'left', i, letters.left[i]))
+    if (recipe.right.some(a => a.dy) || recipe.left.some(a => a.dy)) {
+      const reset = el('button', 'sb-add', 'Put every arm back at its default height')
+      reset.type = 'button'
+      reset.addEventListener('click', () => update({right: recipe.right.map(a => ({...a, dy: 0})), left: recipe.left.map(a => ({...a, dy: 0}))}))
+      s.appendChild(reset)
+    }
+    s.appendChild(el('div', 'sb-soon', `Up / down moves one arm from its default place (+ up, &minus; down), for example a lone arm on the left that belongs at the middle or lower level. Under ${STANDOFF_FT * 12} in an arm becomes a standoff: the insulator is mounted straight on the ${lattice ? 'tower' : 'pole'}.`))
     if (!lattice) {
+      s = sec('Pole-top phase')
       const row = el('label', 'sb-check', '<input type="checkbox"><span>Phase on top of the pole</span>')
       row.firstChild.checked = recipe.topPhase
       row.firstChild.addEventListener('change', e => update({topPhase: e.target.checked}))
       s.appendChild(row)
+      if (recipe.topPhase) {
+        const top = recipe.topInsulator
+        cards(s, 'topins', [{id: 'pin', label: 'Pole-top pin insulator'}, {id: 'suspension', label: 'Suspension string on a bracket'}], top.type, id => update({topInsulator: {...top, type: id}}))
+        const topType = INSULATORS.find(t => t.id === top.type)
+        cards(s, 'topmat', topType.materials.map(m => ({id: m, label: cap(m)})), top.material, m => update({topInsulator: {...top, material: m}})).style.marginTop = '8px'
+        s.appendChild(el('div', 'sb-soon', `This is wire ${letters.top}. It is a real phase, separate from the static (shield) wire in Details, and the two can be used together. A string uses the bell count under Insulators.`))
+      }
     }
-    const letters = armLetters(recipe)
-    if (recipe.right.length + recipe.left.length > 1) {
-      s.appendChild(el('div', 'sb-sub', 'Length of every arm'))
-      numberRow(s, 'All arms', 'ft', () => (recipe.right.length ? recipe.right[0] : recipe.left[0]), v => update({right: recipe.right.map(() => v), left: recipe.left.map(() => v)}, true), LIMITS.armLength)
-    }
-    const standTag = v => (v < STANDOFF_FT ? 'standoff' : '')
-    if (recipe.right.length || recipe.left.length) s.appendChild(el('div', 'sb-sub', 'Each arm (the arm letter is its wire)'))
-    recipe.right.forEach((_, i) => numberRow(s, `Arm ${letters.right[i]} &middot; right`, 'ft', () => recipe.right[i], v => setArmLength('right', i, v), LIMITS.armLength, 'sb-armrow', standTag))
-    recipe.left.forEach((_, i) => numberRow(s, `Arm ${letters.left[i]} &middot; left`, 'ft', () => recipe.left[i], v => setArmLength('left', i, v), LIMITS.armLength, 'sb-armrow', standTag))
-    s.appendChild(el('div', 'sb-soon', `Under ${STANDOFF_FT * 12} in an arm becomes a standoff: the insulator is mounted straight on the ${lattice ? 'tower' : 'pole'}.`))
-    s = section('4 &middot; Size')
+    s = sec('Size')
     numberRow(s, lattice ? 'Tower height' : 'Pole height', 'ft', () => recipe.height, v => update({height: v}, true), LIMITS.height)
     if (recipe.right.length > 1 || recipe.left.length > 1) numberRow(s, 'Arm spacing', 'ft', () => recipe.armSpacing, v => update({armSpacing: v}, true), LIMITS.armSpacing)
-    s = section('5 &middot; Insulators')
+    s = sec('Insulators on the arms')
     cards(s, 'ins', INSULATORS, recipe.insulator.type, id => update({insulator: {...recipe.insulator, type: id}}))
     const type = INSULATORS.find(t => t.id === recipe.insulator.type)
     cards(s, 'mat', type.materials.map(m => ({id: m, label: cap(m)})), recipe.insulator.material, m => update({insulator: {...recipe.insulator, material: m}})).style.marginTop = '8px'
     if (type.bells) numberRow(s, 'Bells', '', () => recipe.insulator.bells, v => update({insulator: {...recipe.insulator, bells: v}}, true), LIMITS.bells)
-    s = section('6 &middot; Details')
+    s = sec('Details')
     const checks = [['staticWire', 'Static (shield) wire']]
     if (!lattice) checks.unshift(['downGround', 'Down ground (pole ground)'])
     checks.forEach(([k, label]) => {

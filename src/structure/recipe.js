@@ -7,9 +7,12 @@
 //   {
 //     v: 2, structure: 'single-pole' | 'lattice', height,           feet, ground to the top of the pole or tower body
 //     armSpacing,                                                    feet between arms (grows if an insulator needs more room)
-//     right: [feet, ...], left: [feet, ...],                         one number per arm, top to bottom: 0 to 6 arms per side
-//     topPhase,                                                      one more phase on top of a wood pole
-//     insulator: {type, material, bells},
+//     right: [{len, dy}, ...], left: [{len, dy}, ...],               one entry per arm, 0 to 6 arms per side. len: feet of arm
+//                                                                    (a plain number also works). dy: feet to move the arm up (+)
+//                                                                    or down (-) from its default place; arm number i starts i
+//                                                                    spacings below the top, the same on both sides.
+//     topPhase, topInsulator: {type, material},                      one more phase on top of a wood pole, on its own pin or string
+//     insulator: {type, material, bells},                            what the arms carry
 //     details: {downGround, staticWire},
 //     guys: [{angle, reach, attach}],                                degrees around the pole, feet out, feet up the pole
 //   }
@@ -68,6 +71,7 @@ export const LIMITS = {
   armSpacing: [3, 15, 0.5],
   bells: [1, MAX_BELLS, 1],
   arms: [0, 6, 1],
+  armShift: [-60, 60, 0.5], // feet an arm may be moved up or down from its default place
   guyAngle: [0, 355, 5],
   guyReach: [5, 100, 1],
   guyAttach: [5, 100, 1],
@@ -82,6 +86,7 @@ export const DEFAULT_RECIPE = {
   right: [6.5, 6.5, 6.5],
   left: [],
   topPhase: false,
+  topInsulator: {type: 'pin', material: 'porcelain'},
   insulator: {type: 'suspension', material: 'glass', bells: 4},
   details: {downGround: true, staticWire: false},
   guys: [],
@@ -94,7 +99,17 @@ function normalizeInsulator(i = {}) {
   const material = type.materials.includes(i.material) ? i.material : type.materials[0]
   return {type: type.id, material, bells: Math.round(clampTo(LIMITS.bells, i.bells, DEFAULT_RECIPE.insulator.bells))}
 }
-const arms = (list, fallback) => (Array.isArray(list) ? list : fallback).slice(0, LIMITS.arms[1]).map(v => Math.round(clampTo(LIMITS.armLength, v, 6.5) * 4) / 4)
+// the top-of-pole phase carries a pin insulator or a hanging string
+function normalizeTopInsulator(i) {
+  const n = normalizeInsulator(i && i.type ? i : {type: 'pin'})
+  return {type: n.type, material: n.material}
+}
+// an arm is {len, dy}; a plain number means a length with no up/down move
+const arm = (v) => {
+  const o = v && typeof v === 'object' ? v : {len: v}
+  return {len: Math.round(clampTo(LIMITS.armLength, o.len, 6.5) * 4) / 4, dy: Math.round(clampTo(LIMITS.armShift, o.dy, 0) * 10) / 10}
+}
+const arms = (list, fallback) => (Array.isArray(list) ? list : fallback).slice(0, LIMITS.arms[1]).map(arm)
 
 // Fills in anything missing and keeps every number inside what the parts can handle. A recipe from before version 2 starts over.
 export function normalizeRecipe(r) {
@@ -110,6 +125,7 @@ export function normalizeRecipe(r) {
     right: arms(r.right, base.right),
     left: arms(r.left, base.left),
     topPhase: pole && !!r.topPhase,
+    topInsulator: normalizeTopInsulator(r.topInsulator),
     insulator: normalizeInsulator(r.insulator),
     details: {
       downGround: pole && !(r.details && r.details.downGround === false),
@@ -135,6 +151,28 @@ export function armLetters(recipe) {
   const right = recipe.right.map(take)
   const left = recipe.left.map(take)
   return {top, right, left}
+}
+
+// Where every arm sits, in meters up from the ground. Arm number i starts i spacings below the top (the same on both sides),
+// then its own up/down move is added. Also used by the panel to show "at 38.5 ft" next to each arm.
+export function layoutArms(recipeIn) {
+  const recipe = normalizeRecipe(recipeIn)
+  const lattice = recipe.structure === 'lattice'
+  const H = recipe.height * FT
+  const susp = recipe.insulator.type === 'suspension'
+  const len = stringLength(recipe.insulator.bells)
+  const toTop = lattice ? 2.4 : 0.7
+  const wanted = recipe.armSpacing * FT
+  const need = susp ? len + 0.4 : PIN_HEIGHT + 0.5 // the insulator must clear the arm below (hanging) or above (standing)
+  const spacing = Math.max(wanted, need)
+  const hi = H - toTop
+  const lo = Math.min(hi, 0.6 + (susp ? len : 0)) // keep the wire off the ground
+  const place = (a, i) => {
+    const raw = hi - i * spacing + a.dy * FT
+    const y = Math.min(hi, Math.max(lo, raw))
+    return {y, clamped: Math.abs(y - raw) > 1e-6}
+  }
+  return {spacing, wanted, need, slot: k => hi - k * spacing, right: recipe.right.map(place), left: recipe.left.map(place)}
 }
 
 // Returns {group, mats, recipe, info}. info: the wires (name, letter, height), notes for the user, the lowest wire height.
@@ -171,18 +209,14 @@ export function buildStructure(recipeIn) {
     ? {insY: armBottom, condY: armBottom - len + 0.1}
     : {insY: armTop, condY: armTop + PIN_HEIGHT + 0.03})
 
-  const phases = [] // {letter, x, z, insY, condY, side}
-  const toTop = lattice ? 2.4 : 0.7
+  const phases = [] // {letter, x, z, insY, condY, side, susp?, kind?}
   const nArms = Math.max(recipe.right.length, recipe.left.length)
-  const wanted = recipe.armSpacing * FT
-  const need = susp ? len + 0.4 : PIN_HEIGHT + 0.5 // the insulator must clear the arm below (hanging) or above (standing)
-  const spacing = Math.max(wanted, need)
-  if (nArms > 1 && spacing > wanted + 1e-6) notes.push(`Arm spacing was increased to ${(spacing / FT).toFixed(1)} ft so the insulators clear the next arm.`)
-  let lowestArmY = H
+  const lay = layoutArms(recipe)
+  if (nArms > 1 && lay.spacing > lay.wanted + 1e-6) notes.push(`Arm spacing was increased to ${(lay.spacing / FT).toFixed(1)} ft so the insulators clear the next arm.`)
 
   const addArm = (side, i, lengthFt, letter) => {
-    const y = H - toTop - i * spacing
-    lowestArmY = Math.min(lowestArmY, y)
+    const {y, clamped} = lay[side === 1 ? 'right' : 'left'][i]
+    if (clamped) notes.push(`Arm ${letter} was held at ${(y / FT).toFixed(1)} ft: that is as far up or down as it can go on this structure.`)
     const root = sideAt(y)
     const L = lengthFt * FT
     const name = `Crossarm_${letter}`
@@ -205,28 +239,44 @@ export function buildStructure(recipeIn) {
     const inset = Math.min(0.25, L * 0.4)
     phases.push({letter, x: arm.userData.endX - side * inset, z: 0, ...seat(arm.userData.top, lattice ? y - 0.02 : y - 0.08)})
   }
-  recipe.right.forEach((l, i) => addArm(1, i, l, letters.right[i]))
-  recipe.left.forEach((l, i) => addArm(-1, i, l, letters.left[i]))
+  recipe.right.forEach((a, i) => addArm(1, i, a.len, letters.right[i]))
+  recipe.left.forEach((a, i) => addArm(-1, i, a.len, letters.left[i]))
 
-  // a phase on top of a wood pole
+  // two arms on one side must leave room for the insulator between them
+  const crowded = (side, list, names) => {
+    const order = list.map((p, i) => ({y: p.y, n: names[i]})).sort((a, b) => b.y - a.y)
+    for (let k = 1; k < order.length; k++) {
+      const gap = order[k - 1].y - order[k].y
+      if (gap < 0.15) notes.push(`Arms ${order[k - 1].n} and ${order[k].n} are at the same height on the ${side}. Move one up or down.`)
+      else if (gap < lay.need - 0.05) notes.push(`Arms ${order[k - 1].n} and ${order[k].n} on the ${side} are only ${(gap / FT).toFixed(1)} ft apart: the insulator may touch the next arm.`)
+    }
+  }
+  crowded('right', lay.right, letters.right)
+  crowded('left', lay.left, letters.left)
+
+  // a phase on top of a wood pole: a pole-top pin insulator, or a string hung from a short bracket
+  const top = recipe.topInsulator
+  const topSusp = top.type === 'suspension'
   if (recipe.topPhase) {
     const r = sideAt(H)
-    if (susp) {
+    if (topSusp) {
       const y = H - 0.15
       const stub = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.45).translate(0, y, r + 0.2), mats.steel)
       stub.name = 'TopBracket'
       group.add(stub)
-      phases.push({letter: letters.top, x: 0, z: r + 0.4, insY: y - 0.035, condY: y - 0.035 - len + 0.1})
+      phases.push({letter: letters.top, x: 0, z: r + 0.4, insY: y - 0.035, condY: y - 0.035 - len + 0.1, susp: true, kind: top.material})
     } else {
-      phases.push({letter: letters.top, x: 0, z: 0, insY: H, condY: H + PIN_HEIGHT + 0.03})
+      phases.push({letter: letters.top, x: 0, z: 0, insY: H, condY: H + PIN_HEIGHT + 0.03, susp: false, kind: top.material})
     }
   }
 
   phases.forEach((p) => {
     const insName = `Insulator${p.letter}`
-    group.add(susp
-      ? makeInsulatorString(mats, {name: insName, x: p.x, y: p.insY, z: p.z, bells, kind: ins.material})
-      : makePinInsulator(mats, {name: insName, x: p.x, y: p.insY, z: p.z, kind: ins.material, side: p.lying ? p.side : 0}))
+    const isSusp = p.susp !== undefined ? p.susp : susp
+    const kind = p.kind || ins.material
+    group.add(isSusp
+      ? makeInsulatorString(mats, {name: insName, x: p.x, y: p.insY, z: p.z, bells, kind})
+      : makePinInsulator(mats, {name: insName, x: p.x, y: p.insY, z: p.z, kind, side: p.lying ? p.side : 0}))
     const name = `Phase${p.letter}_Conductor`
     const cx = p.condX !== undefined ? p.condX : p.x
     const c = makeConductor(mats, {name, x: cx, y: p.condY})
@@ -241,7 +291,7 @@ export function buildStructure(recipeIn) {
 
   if (recipe.details.downGround && pole) group.add(...makeDownGround(mats, pole, {topY: H - 0.6}))
   if (recipe.details.staticWire) {
-    const mastHeight = recipe.topPhase && !susp ? 1.3 : 0.9 // taller when a pin insulator carries the top phase
+    const mastHeight = recipe.topPhase && !topSusp ? 1.3 : 0.9 // taller when a pin insulator carries the top phase
     const [mast, wire] = makeStaticWire(mats, {height: H}, {mastHeight})
     group.add(mast, wire)
     conductors.push({name: 'Static_Conductor', letter: 'S', x: 0, y: H + mastHeight + 0.04})
