@@ -149,7 +149,7 @@ async function main() {
     const cur = recipe[side]
     const other = recipe[side === 'right' ? 'left' : 'right']
     const last = cur.length ? cur[cur.length - 1] : (other.length ? other[other.length - 1] : null)
-    const fill = {len: last ? last.len : TYPE_DEFAULTS[recipe.structure].right[0], dy: 0} // a new arm: same length, default place
+    const fill = {len: last ? last.len : TYPE_DEFAULTS[recipe.structure].right[0], dy: 0, de: last ? last.de : false} // a new arm: same length and kind, default place
     const arr = cur.slice(0, n)
     while (arr.length < n) arr.push(fill)
     update({[side]: arr})
@@ -180,6 +180,10 @@ async function main() {
     }
     syncers.push(show)
     show()
+    const de = el('label', 'sb-check', '<input type="checkbox"><span>Dead end (strings + jumper)</span>')
+    de.firstChild.checked = recipe[side][i].de
+    de.firstChild.addEventListener('change', e => setArm(side, i, {de: e.target.checked}, false))
+    box.appendChild(de)
     numberRow(box, 'Length', 'ft', () => recipe[side][i].len, v => setArm(side, i, {len: v}), LIMITS.armLength)
     numberRow(box, 'Up / down', 'ft', () => recipe[side][i].dy, v => setArm(side, i, {dy: v}), LIMITS.armShift)
     box.appendChild(chips)
@@ -212,7 +216,16 @@ async function main() {
       s.appendChild(el('div', 'sb-sub', 'Length of every arm'))
       numberRow(s, 'All arms', 'ft', () => (recipe.right.length ? recipe.right[0].len : recipe.left[0].len), v => update({right: recipe.right.map(a => ({...a, len: v})), left: recipe.left.map(a => ({...a, len: v}))}, true), LIMITS.armLength)
     }
-    if (recipe.right.length || recipe.left.length) s.appendChild(el('div', 'sb-sub', 'Each arm (the arm letter is its wire)'))
+    const allArms = [...recipe.right, ...recipe.left]
+    if (allArms.length) {
+      s.appendChild(el('div', 'sb-sub', 'Line end'))
+      const row = el('label', 'sb-check', '<input type="checkbox"><span>Dead end on every arm</span>')
+      row.firstChild.checked = allArms.every(a => a.de)
+      row.firstChild.addEventListener('change', e => update({right: recipe.right.map(a => ({...a, de: e.target.checked})), left: recipe.left.map(a => ({...a, de: e.target.checked}))}))
+      s.appendChild(row)
+      s.appendChild(el('div', 'sb-soon', 'A dead end holds the wire on a strain string on each side of the arm, and a jumper hangs down between them. It is still one wire, one phase. The strings use the bell count under Insulators.'))
+    }
+    if (allArms.length) s.appendChild(el('div', 'sb-sub', 'Each arm (the arm letter is its wire)'))
     recipe.right.forEach((_, i) => armBox(s, 'right', i, letters.right[i]))
     recipe.left.forEach((_, i) => armBox(s, 'left', i, letters.left[i]))
     if (recipe.right.some(a => a.dy) || recipe.left.some(a => a.dy)) {
@@ -243,7 +256,7 @@ async function main() {
     cards(s, 'ins', INSULATORS, recipe.insulator.type, id => update({insulator: {...recipe.insulator, type: id}}))
     const type = INSULATORS.find(t => t.id === recipe.insulator.type)
     cards(s, 'mat', type.materials.map(m => ({id: m, label: cap(m)})), recipe.insulator.material, m => update({insulator: {...recipe.insulator, material: m}})).style.marginTop = '8px'
-    if (type.bells) numberRow(s, 'Bells', '', () => recipe.insulator.bells, v => update({insulator: {...recipe.insulator, bells: v}}, true), LIMITS.bells)
+    if (type.bells || allArms.some(a => a.de)) numberRow(s, 'Bells', '', () => recipe.insulator.bells, v => update({insulator: {...recipe.insulator, bells: v}}, true), LIMITS.bells)
     s = sec('Details')
     const checks = [['staticWire', 'Static (shield) wire']]
     if (!lattice) checks.unshift(['downGround', 'Down ground (pole ground)'])

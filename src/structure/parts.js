@@ -175,6 +175,44 @@ export function makeConductor(mats, {name, x, y, halfSpan = 4, droop = 0.35, rad
   return m
 }
 
+// ---- dead end -------------------------------------------------------------------------------------------------
+// Where the line stops on the structure: a strain insulator string lies along the line on each side of the arm tip, each
+// holds the end of a wire, and a jumper hangs down between the two string ends to join them. The two spans and the jumper are
+// ONE mesh (one conductor, one phase), so a ground clamp anywhere on it is on that phase.
+const DE_START = 0.1 // m from the arm center to where each string starts
+export const deadEndReach = bells => DE_START + stringLength(bells)
+export const deadEndDip = bells => Math.min(1.1, 0.5 + 0.2 * deadEndReach(bells)) // how far the jumper hangs below the arm
+export const DEADEND_DROP = 1.1 // how far each wire span has fallen below the arm tip at its far end
+
+// side: +1 string out toward +Z, -1 toward -Z. (x, y) is the arm tip, y at the middle of the arm.
+export function makeDeadEndString(mats, {name, x, y, side, bells = 4, kind = 'glass'}) {
+  const g = makeInsulatorString(mats, {name, x, y, z: side * DE_START, bells, kind})
+  g.rotation.x = side > 0 ? -Math.PI / 2 : Math.PI / 2 // the string lies along the line instead of hanging down
+  return g
+}
+
+export function makeDeadEndConductor(mats, {name, x, y, bells = 4, halfSpan, radius = CONDUCTOR_RADIUS}) {
+  const E = deadEndReach(bells)
+  const far = halfSpan || E + 3.2
+  const dip = deadEndDip(bells)
+  const span = (dir) => {
+    const pts = []
+    for (let i = 0; i <= 14; i++) {
+      const t = i / 14
+      pts.push(new THREE.Vector3(0, -DEADEND_DROP * (0.18 * t + 0.82 * t * t), dir * (E + t * (far - E))))
+    }
+    return cappedTube(pts, radius, 12, 28)
+  }
+  const jumper = []
+  for (let i = 0; i <= 24; i++) {
+    const u = -1 + (2 * i) / 24
+    jumper.push(new THREE.Vector3(0, -dip * (1 - u * u), E * u))
+  }
+  const m = named(name, mergeGeometries([span(-1), cappedTube(jumper, radius, 12, 40), span(1)]), mats.aluminum)
+  m.position.set(x, y, 0)
+  return m
+}
+
 // ---- details --------------------------------------------------------------------------------------------------
 // The down ground (pole ground): a copper lead down the +Z face of the pole and the ground point near its foot.
 export function makeDownGround(mats, pole, {topY, leadRadius = 0.03, bottomY = 0.5}) {

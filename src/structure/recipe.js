@@ -7,7 +7,8 @@
 //   {
 //     v: 2, structure: 'single-pole' | 'lattice', height,           feet, ground to the top of the pole or tower body
 //     armSpacing,                                                    feet between arms (grows if an insulator needs more room)
-//     right: [{len, dy}, ...], left: [{len, dy}, ...],               one entry per arm, 0 to 6 arms per side. len: feet of arm
+//     right: [{len, dy, de}, ...], left: [...],                      one entry per arm, 0 to 6 arms per side. de: a dead end (the
+//                                                                    line stops here: two strain strings and a jumper). len: feet of arm
 //                                                                    (a plain number also works). dy: feet to move the arm up (+)
 //                                                                    or down (-) from its default place; arm number i starts i
 //                                                                    spacings below the top, the same on both sides.
@@ -23,6 +24,7 @@ import * as THREE from 'three'
 import {
   makeMaterials, makePole, makeSideArm, makeStandoffBracket, makeTrussArm, makeLatticeTower, makeInsulatorString, makePinInsulator,
   makeConductor, makeDownGround, makeStaticWire, makeGuy, poleRadiusAt, stringLength, MAX_BELLS, PIN_HEIGHT,
+  makeDeadEndString, makeDeadEndConductor, deadEndDip, DEADEND_DROP,
 } from './parts.js'
 
 export const FT = 0.3048
@@ -107,7 +109,7 @@ function normalizeTopInsulator(i) {
 // an arm is {len, dy}; a plain number means a length with no up/down move
 const arm = (v) => {
   const o = v && typeof v === 'object' ? v : {len: v}
-  return {len: Math.round(clampTo(LIMITS.armLength, o.len, 6.5) * 4) / 4, dy: Math.round(clampTo(LIMITS.armShift, o.dy, 0) * 10) / 10}
+  return {len: Math.round(clampTo(LIMITS.armLength, o.len, 6.5) * 4) / 4, dy: Math.round(clampTo(LIMITS.armShift, o.dy, 0) * 10) / 10, de: !!o.de}
 }
 const arms = (list, fallback) => (Array.isArray(list) ? list : fallback).slice(0, LIMITS.arms[1]).map(arm)
 
@@ -163,11 +165,12 @@ export function layoutArms(recipeIn) {
   const len = stringLength(recipe.insulator.bells)
   const toTop = lattice ? 2.4 : 0.7
   const wanted = recipe.armSpacing * FT
-  const need = susp ? len + 0.4 : PIN_HEIGHT + 0.5 // the insulator must clear the arm below (hanging) or above (standing)
+  let need = susp ? len + 0.4 : PIN_HEIGHT + 0.5 // the insulator must clear the arm below (hanging) or above (standing)
+  if ([...recipe.right, ...recipe.left].some(a => a.de)) need = Math.max(need, deadEndDip(recipe.insulator.bells) + 0.4) // the jumper hangs down
   const spacing = Math.max(wanted, need)
   const hi = H - toTop
-  const lo = Math.min(hi, 0.6 + (susp ? len : 0)) // keep the wire off the ground
   const place = (a, i) => {
+    const lo = Math.min(hi, 0.6 + (a.de ? DEADEND_DROP : susp ? len : 0)) // keep the wire off the ground
     const raw = hi - i * spacing + a.dy * FT
     const y = Math.min(hi, Math.max(lo, raw))
     return {y, clamped: Math.abs(y - raw) > 1e-6}
@@ -214,8 +217,15 @@ export function buildStructure(recipeIn) {
   const lay = layoutArms(recipe)
   if (nArms > 1 && lay.spacing > lay.wanted + 1e-6) notes.push(`Arm spacing was increased to ${(lay.spacing / FT).toFixed(1)} ft so the insulators clear the next arm.`)
 
-  const addArm = (side, i, lengthFt, letter) => {
+  // dead-end strings are strain strings: glass or polymer, with the bell count from the Insulators section
+  const deadKind = ins.type === 'suspension' ? ins.material : (ins.material === 'polymer' ? 'polymer' : 'glass')
+  const addArm = (side, i, a, letter) => {
     const {y, clamped} = lay[side === 1 ? 'right' : 'left'][i]
+    let lengthFt = a.len
+    if (a.de && lengthFt < 1.5) {
+      lengthFt = 1.5
+      notes.push(`Arm ${letter} is a dead end, so it is drawn at least 1.5 ft long to carry the strings.`)
+    }
     if (clamped) notes.push(`Arm ${letter} was held at ${(y / FT).toFixed(1)} ft: that is as far up or down as it can go on this structure.`)
     const root = sideAt(y)
     const L = lengthFt * FT
@@ -236,11 +246,15 @@ export function buildStructure(recipeIn) {
       ? makeTrussArm(mats, {name, side, y, rootX: root, length: L})
       : makeSideArm(mats, {name, side, y, rootX: root, length: L})
     group.add(arm)
+    if (a.de) {
+      phases.push({letter, x: arm.userData.endX - side * 0.1, z: 0, yA: y, deadEnd: true})
+      return
+    }
     const inset = Math.min(0.25, L * 0.4)
     phases.push({letter, x: arm.userData.endX - side * inset, z: 0, ...seat(arm.userData.top, lattice ? y - 0.02 : y - 0.08)})
   }
-  recipe.right.forEach((a, i) => addArm(1, i, a.len, letters.right[i]))
-  recipe.left.forEach((a, i) => addArm(-1, i, a.len, letters.left[i]))
+  recipe.right.forEach((a, i) => addArm(1, i, a, letters.right[i]))
+  recipe.left.forEach((a, i) => addArm(-1, i, a, letters.left[i]))
 
   // two arms on one side must leave room for the insulator between them
   const crowded = (side, list, names) => {
@@ -271,6 +285,15 @@ export function buildStructure(recipeIn) {
   }
 
   phases.forEach((p) => {
+    if (p.deadEnd) {
+      // two strain strings along the line, one wire (both spans and the jumper) named for the phase
+      group.add(makeDeadEndString(mats, {name: `Insulator${p.letter}_Front`, x: p.x, y: p.yA, side: 1, bells, kind: deadKind}))
+      group.add(makeDeadEndString(mats, {name: `Insulator${p.letter}_Back`, x: p.x, y: p.yA, side: -1, bells, kind: deadKind}))
+      const name = `Phase${p.letter}_Conductor`
+      group.add(makeDeadEndConductor(mats, {name, x: p.x, y: p.yA, bells}))
+      conductors.push({name, letter: p.letter, x: p.x, y: p.yA - DEADEND_DROP})
+      return
+    }
     const insName = `Insulator${p.letter}`
     const isSusp = p.susp !== undefined ? p.susp : susp
     const kind = p.kind || ins.material
